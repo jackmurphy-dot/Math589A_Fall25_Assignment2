@@ -1,56 +1,42 @@
 # plu_decomposition.py
-# In-place PAQ = LU with simulated row exchanges and virtual column exchanges.
-
-from typing import Tuple, List
 import numpy as np
+from typing import Tuple, List
 from logging_setup import logger
 
 Array = np.ndarray
 
 def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, List[int], int]:
-    if not isinstance(A, np.ndarray):
-        A = np.asarray(A, dtype=np.float64)
-    A = A.astype(np.float64, copy=False)
-
+    """In-place PAQ = LU factorization with row+column pivoting."""
+    A = np.asarray(A, dtype=np.float64)
     m, n = A.shape
-    P = np.arange(m, dtype=int)
-    Q = np.arange(n, dtype=int)
+    P = np.arange(m)
+    Q = np.arange(n)
     r = 0
     min_mn = min(m, n)
 
     while r < min_mn:
-        best_val = 0.0
-        piv_i = -1
-        piv_j = -1
-        # Full pivot search (max abs value)
-        for j in range(r, n):
-            cj = Q[j]
-            for i in range(r, m):
-                val = abs(A[P[i], cj])
-                if val > best_val:
-                    best_val, piv_i, piv_j = val, i, j
-
-        if best_val < tol or piv_i < 0 or piv_j < 0:
+        # Global pivot search on submatrix A[P[r:], Q[r:]]
+        sub = np.abs(A[np.ix_(P[r:], Q[r:])])
+        i_rel, j_rel = np.unravel_index(np.argmax(sub), sub.shape)
+        piv_val = sub[i_rel, j_rel]
+        if piv_val < tol:
             break
-
-        if piv_i != r:
-            P[r], P[piv_i] = P[piv_i], P[r]
-        if piv_j != r:
-            Q[r], Q[piv_j] = Q[piv_j], Q[r]
-
+        i = r + i_rel
+        j = r + j_rel
+        # Row and column swaps
+        if i != r:
+            P[[r, i]] = P[[i, r]]
+        if j != r:
+            Q[[r, j]] = Q[[j, r]]
         pr, qr = P[r], Q[r]
         piv = A[pr, qr]
 
-        for i in range(r + 1, m):
-            pi = P[i]
-            if abs(piv) >= tol:
-                Lij = A[pi, qr] / piv
-            else:
-                Lij = 0.0
+        # Eliminate below pivot
+        for ii in range(r + 1, m):
+            pi = P[ii]
+            Lij = A[pi, qr] / piv
             A[pi, qr] = Lij
-            if abs(Lij) > 0:
-                A[pi, Q[r + 1 : n]] -= Lij * A[pr, Q[r + 1 : n]]
-
+            A[pi, Q[r + 1:]] -= Lij * A[pr, Q[r + 1:]]
         r += 1
 
     pivot_cols = list(Q[:r])

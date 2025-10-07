@@ -39,24 +39,28 @@ def build_nullspace(A, P, Q, r, n, tol):
     if k == 0:
         return N
     if r == 0:
-        N[:, :] = np.eye(n)
-        return N
+        return np.eye(n, k, dtype=np.float64)
+
     for f in range(k):
+        # For each free variable, solve for the basic variables
         rhs = -A[P[:r], Q[r + f]]
         x_b = np.zeros(r, dtype=np.float64)
+
+        # Perform back-substitution to find the basic variables of the null space vector
         for i in range(r - 1, -1, -1):
-            # THE FIX: Replaced np.dot with an explicit loop for robustness.
             s = 0.0
             for j in range(i + 1, r):
                 s += A[P[i], Q[j]] * x_b[j]
-
+            
             piv = A[P[i], Q[i]]
             if abs(piv) < tol:
-                raise np.linalg.LinAlgError("Singular U block.")
+                raise np.linalg.LinAlgError("Singular U block in nullspace calculation.")
             x_b[i] = (rhs[i] - s) / piv
+        
+        # Assemble the full null space vector
         col = np.zeros(n, dtype=np.float64)
-        col[Q[:r]] = x_b
-        col[Q[r + f]] = 1.0
+        col[Q[:r]] = x_b      # Set basic variables
+        col[Q[r + f]] = 1.0  # Set the current free variable to 1
         N[:, f] = col
     return N
 
@@ -67,31 +71,31 @@ def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array
       - c: particular solution (or None if inconsistent)
       - N: nullspace basis
     """
-    A = np.asarray(A, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64).reshape(-1)
-    m, n = A.shape
-    if b.shape[0] != m:
+    A_in = np.asarray(A, dtype=np.float64)
+    b_in = np.asarray(b, dtype=np.float64).reshape(-1)
+    m, n = A_in.shape
+    if b_in.shape[0] != m:
         raise ValueError("Dimension mismatch between A and b")
 
-    # Copy to preserve A
-    A_copy = np.array(A, dtype=np.float64, copy=True, order="C")
-    A_fac, P, Q, _, r = paq_lu(A_copy, tol=tol)
+    # The PAQ=LU function works on a copy
+    A_fac, P, Q, _, r = paq_lu(A_in, tol=tol)
 
-    # Forward solve: L y = P b
-    y = forward_substitution(A_fac, P, Q, b, r)
+    # Step 1: Solve Ly = Pb
+    y = forward_substitution(A_fac, P, Q, b_in, r)
 
-    # Check consistency (rows > rank should give 0)
-    if r < m and np.max(np.abs(y[r:])) > tol:
+    # Step 2: Check for consistency
+    if r < m and np.any(np.abs(y[r:]) > tol):
         N = build_nullspace(A_fac, P, Q, r, n, tol)
         return None, N
 
-    # Backward solve: U x_b = y[:r]
-    x_b = backward_substitution(A_fac, P, Q, y[:r], r, tol)
+    # Step 3: Solve U_basic * z_basic = y_basic for the particular solution
+    z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
 
-    # Recover full solution: x = Q ( [x_b; 0] )
+    # Step 4: Reconstruct the full particular solution vector c from z_basic
     c = np.zeros(n, dtype=np.float64)
-    c[Q[:r]] = x_b
+    c[Q[:r]] = z_basic
 
-    # Nullspace basis
+    # Step 5: Find the nullspace basis
     N = build_nullspace(A_fac, P, Q, r, n, tol)
+    
     return c, N

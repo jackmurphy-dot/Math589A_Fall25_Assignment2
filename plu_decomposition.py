@@ -1,4 +1,3 @@
-# plu_decomposition.py
 import numpy as np
 from typing import Tuple, List
 from logging_setup import logger
@@ -6,7 +5,14 @@ from logging_setup import logger
 Array = np.ndarray
 
 def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, List[int], int]:
-    """In-place PAQ = LU factorization with row+column pivoting."""
+    """
+    Compute PAQ = LU with full pivoting (global row+column pivot).
+    Returns:
+      A (modified, holds L and U),
+      P, Q (permutation vectors),
+      pivot_cols (Q[:r]),
+      r (rank)
+    """
     A = np.asarray(A, dtype=np.float64)
     m, n = A.shape
     P = np.arange(m)
@@ -15,19 +21,19 @@ def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, 
     min_mn = min(m, n)
 
     while r < min_mn:
-        # Global pivot search on submatrix A[P[r:], Q[r:]]
+        # Full pivot search on submatrix A[P[r:], Q[r:]]
         sub = np.abs(A[np.ix_(P[r:], Q[r:])])
         i_rel, j_rel = np.unravel_index(np.argmax(sub), sub.shape)
-        piv_val = sub[i_rel, j_rel]
-        if piv_val < tol:
+        if sub[i_rel, j_rel] < tol:
             break
-        i = r + i_rel
-        j = r + j_rel
+        i, j = r + i_rel, r + j_rel
+
         # Row and column swaps
         if i != r:
             P[[r, i]] = P[[i, r]]
         if j != r:
             Q[[r, j]] = Q[[j, r]]
+
         pr, qr = P[r], Q[r]
         piv = A[pr, qr]
 

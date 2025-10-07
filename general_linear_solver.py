@@ -9,86 +9,84 @@ def forward_substitution(A, P, Q, b, r):
     """Solves L y = P b, where L has an implicit unit diagonal."""
     m = len(P)
     y = np.zeros(m, dtype=np.float64)
-    b_perm = b[P]
+    b_permuted = b[P]
     for i in range(m):
-        # Dot product for the sum part of the substitution
-        s = np.dot(A[P[i], Q[:min(i, r)]], y[:min(i, r)])
-        y[i] = b_perm[i] - s
+        sum_val = 0.0
+        for j in range(min(i, r)):
+            sum_val += A[P[i], Q[j]] * y[j]
+        y[i] = b_permuted[i] - sum_val
     return y
 
-def backward_substitution(A, P, Q, y, r, tol):
+def backward_substitution(A, P, Q, y_slice, r, tol):
     """Solves U_basic z_basic = y_basic for the basic variables."""
     z_basic = np.zeros(r, dtype=np.float64)
     for i in range(r - 1, -1, -1):
-        s = np.dot(A[P[i], Q[i + 1:r]], z_basic[i + 1:r])
+        sum_val = 0.0
+        for j in range(i + 1, r):
+            sum_val += A[P[i], Q[j]] * z_basic[j]
+        
         pivot = A[P[i], Q[i]]
         if abs(pivot) < tol:
-            raise np.linalg.LinAlgError("Singular pivot encountered in U.")
-        z_basic[i] = (y[i] - s) / pivot
+            raise np.linalg.LinAlgError("Matrix is singular or near-singular.")
+        z_basic[i] = (y_slice[i] - sum_val) / pivot
     return z_basic
 
 def build_nullspace(A, P, Q, r, n, tol):
     """Constructs a basis for the nullspace of A."""
-    num_free = n - r
-    if num_free <= 0:
+    num_free_vars = n - r
+    if num_free_vars <= 0:
         return np.zeros((n, 0), dtype=np.float64)
 
-    N = np.zeros((n, num_free), dtype=np.float64)
-    for f in range(num_free):
-        # For each free variable, find the corresponding nullspace vector
-        # by solving U_basic * z_basic = -U_free * e_f
+    N = np.zeros((n, num_free_vars), dtype=np.float64)
+    for f in range(num_free_vars):
+        # Solve U_basic * z_basic = -U_free * e_f for each free variable
         rhs = -A[P[:r], Q[r + f]]
         
-        # Solve for the basic variables of the nullspace vector via back substitution
         z_basic = np.zeros(r, dtype=np.float64)
         for i in range(r - 1, -1, -1):
-            s = np.dot(A[P[i], Q[i + 1:r]], z_basic[i + 1:r])
+            sum_val = 0.0
+            for j in range(i + 1, r):
+                sum_val += A[P[i], Q[j]] * z_basic[j]
+            
             pivot = A[P[i], Q[i]]
             if abs(pivot) < tol:
                 raise np.linalg.LinAlgError("Singular U block in nullspace calculation.")
-            z_basic[i] = (rhs[i] - s) / pivot
+            z_basic[i] = (rhs[i] - sum_val) / pivot
 
-        # Assemble the full nullspace vector x
+        # Assemble the full nullspace vector and un-permute columns
         x_null = np.zeros(n, dtype=np.float64)
-        x_null[Q[:r]] = z_basic      # Set basic variables
-        x_null[Q[r + f]] = 1.0     # Set the f-th free variable to 1
+        x_null[Q[:r]] = z_basic
+        x_null[Q[r + f]] = 1.0
         N[:, f] = x_null
     return N
 
 def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array]:
-    """
-    Solves the linear system A x = b for x.
+    """Solves the linear system A x = b."""
+    A_input = np.asarray(A, dtype=np.float64)
+    b_input = np.asarray(b, dtype=np.float64).reshape(-1)
+    m, n = A_input.shape
+    if b_input.shape[0] != m:
+        raise ValueError("Incompatible dimensions between A and b.")
 
-    Returns a tuple (c, N) where:
-      - c is a particular solution, or None if the system is inconsistent.
-      - N is a matrix whose columns form a basis for the nullspace of A.
-    The general solution is x = c + N @ z, where z is any vector of free parameters.
-    """
-    A_in = np.asarray(A, dtype=np.float64)
-    b_in = np.asarray(b, dtype=np.float64).reshape(-1)
-    m, n = A_in.shape
-    if b_in.shape[0] != m:
-        raise ValueError("Dimension mismatch between A and b")
+    # 1. Decompose the matrix
+    A_fac, P, Q, _, r = paq_lu(A_input, tol=tol)
 
-    # 1. Decompose the matrix: PAQ = LU
-    A_fac, P, Q, _, r = paq_lu(A_in, tol=tol)
+    # 2. Solve Ly = Pb
+    y = forward_substitution(A_fac, P, Q, b_input, r)
 
-    # 2. Solve Ly = Pb for y using forward substitution
-    y = forward_substitution(A_fac, P, Q, b_in, r)
-
-    # 3. Check for consistency. If y has non-zero elements past rank r, no solution exists.
-    if r < m and np.any(np.abs(y[r:]) > tol):
+    # 3. Check for consistency
+    if r < m and np.max(np.abs(y[r:])) > tol:
         N = build_nullspace(A_fac, P, Q, r, n, tol)
         return None, N
 
-    # 4. Solve U_basic * z_basic = y[:r] for the particular solution's basic variables
+    # 4. Solve for basic variables for the particular solution
     z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
 
-    # 5. Assemble the full particular solution vector c (free variables are zero)
+    # 5. Assemble the particular solution vector, c
     c = np.zeros(n, dtype=np.float64)
     c[Q[:r]] = z_basic
 
-    # 6. Find the basis for the nullspace
+    # 6. Construct the nullspace
     N = build_nullspace(A_fac, P, Q, r, n, tol)
     
     return c, N

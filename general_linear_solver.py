@@ -17,7 +17,7 @@ def forward_substitution(A, P, Q, b, r):
 
 
 def backward_substitution(A, P, Q, y, r, tol):
-    """Solve U_basic x_basic = y_basic (upper-triangular)."""
+    """Solve U x_b = y_b (upper-triangular)."""
     x_b = np.zeros(r, dtype=np.float64)
     for i in range(r - 1, -1, -1):
         s = np.dot(A[P[i], Q[i + 1:r]], x_b[i + 1:r])
@@ -33,22 +33,22 @@ def build_nullspace(A, P, Q, r, n, tol):
     num_free = n - r
     if num_free <= 0:
         return np.zeros((n, 0), dtype=np.float64)
-    
-    # THE FIX: This handles the r=0 case correctly and robustly.
-    if r == 0:
-        return np.eye(n, num_free, dtype=np.float64)
 
-    # U_basic is A[P[:r], Q[:r]], U_free is A[P[:r], Q[r:]]
-    U_basic_inv = np.linalg.inv(np.triu(A[np.ix_(P[:r], Q[:r])]))
+    # Extract the U_basic and U_free submatrices from the factored matrix A
+    U_basic = np.triu(A[np.ix_(P[:r], Q[:r])])
     U_free = A[np.ix_(P[:r], Q[r:])]
+
+    # The nullspace vectors in the permuted space are found by solving
+    # U_basic * N_basic = -U_free
+    if np.min(np.abs(np.diag(U_basic))) < tol:
+        raise np.linalg.LinAlgError("Singular U_basic matrix in nullspace.")
     
-    # The core of the nullspace is the solution to U_basic * z_basic = -U_free
-    N_permuted = -U_basic_inv @ U_free
+    N_basic = -np.linalg.inv(U_basic) @ U_free
     
-    # Assemble the full nullspace matrix N
+    # Assemble the full nullspace matrix N in the original coordinate system
     N = np.zeros((n, num_free))
-    N[Q[:r], :] = N_permuted
-    N[Q[r:], :] = np.eye(num_free)
+    N[Q[:r], :] = N_basic         # Basic variable rows
+    N[Q[r:], :] = np.eye(num_free) # Free variable rows (identity matrix)
     
     return N
 

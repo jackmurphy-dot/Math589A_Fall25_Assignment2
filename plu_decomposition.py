@@ -13,50 +13,41 @@ def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, 
     P = np.arange(m)
     Q = np.arange(n)
     
-    # k will be the final rank
     k = 0
     while k < min(m, n):
-        # Find best pivot in current column k
-        pivot_row_local = np.argmax(np.abs(A[P[k:], Q[k]]))
-        pivot_row_global = k + pivot_row_local
+        # Find the best pivot row in the current column k
+        i_rel = np.argmax(np.abs(A[P[k:], Q[k]]))
+        i_max = k + i_rel
         
-        # If pivot is too small, find a better column
-        if np.abs(A[P[pivot_row_global], Q[k]]) < tol:
-            best_j = -1
-            max_pivot_val = 0.0
-            best_i_global_for_swap = -1
-
-            # Search remaining columns for the best possible pivot
-            for j_search in range(k + 1, n):
-                i_local = np.argmax(np.abs(A[P[k:], Q[j_search]]))
-                current_pivot_val = np.abs(A[P[k + i_local], Q[j_search]])
-                if current_pivot_val > max_pivot_val:
-                    max_pivot_val = current_pivot_val
-                    best_j = j_search
-                    best_i_global_for_swap = k + i_local
-            
-            if max_pivot_val >= tol:
-                Q[[k, best_j]] = Q[[best_j, k]]
-                pivot_row_global = best_i_global_for_swap
-            else:
-                # No suitable pivot found; rank is k.
-                break
-
-        # Perform row swap
-        P[[k, pivot_row_global]] = P[[pivot_row_global, k]]
+        # If the pivot is too small, find the first available substitute column
+        if np.abs(A[P[i_max], Q[k]]) < tol:
+            found_swap = False
+            for j_swap in range(k + 1, n):
+                # Find best pivot in the potential swap column
+                i_rel_new = np.argmax(np.abs(A[P[k:], Q[j_swap]]))
+                i_max_new = k + i_rel_new
+                if np.abs(A[P[i_max_new], Q[j_swap]]) >= tol:
+                    # Found a suitable column. Perform the swap.
+                    Q[[k, j_swap]] = Q[[j_swap, k]]
+                    i_max = i_max_new # Update the pivot row for the new column
+                    found_swap = True
+                    break
+            if not found_swap:
+                break # No more pivots found anywhere. Rank is k.
         
-        # Elimination
+        # Bring the pivot row to the current position k
+        P[[k, i_max]] = P[[i_max, k]]
+        
+        # Perform elimination
         pk, qk = P[k], Q[k]
-        pivot_element = A[pk, qk]
+        pivot = A[pk, qk]
         
-        # Update pivot column (L factors)
-        A[P[k+1:], qk] /= pivot_element
+        # Calculate and store multipliers in the pivot column
+        A[P[k+1:], qk] /= pivot
         
-        # Update submatrix (Schur complement)
+        # Update the rest of the submatrix using an outer product
         if k + 1 < n:
-            sub_L_col = A[P[k+1:], qk].reshape(-1, 1)
-            sub_U_row = A[pk, Q[k+1:]].reshape(1, -1)
-            A[np.ix_(P[k+1:], Q[k+1:])] -= sub_L_col @ sub_U_row
+            A[np.ix_(P[k+1:], Q[k+1:])] -= np.outer(A[P[k+1:], qk], A[pk, Q[k+1:]])
         
         k += 1
     

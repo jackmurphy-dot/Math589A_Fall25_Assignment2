@@ -19,52 +19,54 @@ def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, 
     m, n = A.shape
     P = np.arange(m)
     Q = np.arange(n)
-    r = 0
+    
+    # Use k as loop counter, r will be the final rank
+    for k in range(min(m, n)):
+        # --- Partial Pivoting: Find best pivot in current column k ---
+        pivot_row_local = np.argmax(np.abs(A[P[k:], Q[k]]))
+        pivot_row_global = k + pivot_row_local
+        
+        # --- Column Exchange: If pivot is too small, find a better column ---
+        if np.abs(A[P[pivot_row_global], Q[k]]) < tol:
+            best_j = -1
+            max_pivot_val = 0.0
+            best_i_global_for_swap = -1
 
-    # Loop over potential pivot positions
-    while r < min(m, n):
-        # --- Partial Pivot Search ---
-        # Find the best pivot row in the current column `r` (from rows `r` to `m-1`).
-        i_rel = np.argmax(np.abs(A[P[r:], Q[r]]))
-        i_max = r + i_rel
-        pivot_val = A[P[i_max], Q[r]]
-
-        # --- Column Exchange ---
-        # If the pivot in the current column is too small, search subsequent
-        # columns for a suitable pivot.
-        if abs(pivot_val) < tol:
-            found_new_pivot = False
-            for j_search in range(r + 1, n):
-                i_rel_new = np.argmax(np.abs(A[P[r:], Q[j_search]]))
-                i_max_new = r + i_rel_new
-                if abs(A[P[i_max_new], Q[j_search]]) >= tol:
-                    # Found a suitable pivot column. Swap columns `r` and `j_search`.
-                    Q[[r, j_search]] = Q[[j_search, r]]
-                    i_max = i_max_new  # Update the pivot row index for the new column
-                    found_new_pivot = True
-                    break
+            # Search all remaining columns for the one with the largest possible pivot
+            for j_search in range(k + 1, n):
+                i_local = np.argmax(np.abs(A[P[k:], Q[j_search]]))
+                current_pivot_val = np.abs(A[P[k + i_local], Q[j_search]])
+                if current_pivot_val > max_pivot_val:
+                    max_pivot_val = current_pivot_val
+                    best_j = j_search
+                    best_i_global_for_swap = k + i_local
             
-            # If no suitable pivot was found in any remaining column, the rank is `r`.
-            if not found_new_pivot:
-                break # Exit main loop
+            # If a suitable pivot was found in another column, swap it in
+            if max_pivot_val >= tol:
+                Q[[k, best_j]] = Q[[best_j, k]]
+                pivot_row_global = best_i_global_for_swap
+            else:
+                # No suitable pivot found anywhere. The rank is k. We're done.
+                r = k
+                return A, P, Q, list(Q[:r]), r
 
         # --- Row Exchange ---
-        # Swap the current row with the pivot row.
-        P[[r, i_max]] = P[[i_max, r]]
-
-        # --- Gaussian Elimination ---
-        pr, qr = P[r], Q[r]
-        pivot_element = A[pr, qr]
-
-        # Calculate multipliers and update the submatrix.
-        for i in range(r + 1, m):
-            pi = P[i]
-            multiplier = A[pi, qr] / pivot_element
-            A[pi, qr] = multiplier  # Store L factor
-            # Update the rest of the row
-            A[pi, Q[r + 1:]] -= multiplier * A[pr, Q[r + 1:]]
+        P[[k, pivot_row_global]] = P[[pivot_row_global, k]]
         
-        r += 1
-
-    pivot_cols = list(Q[:r])
-    return A, P, Q, pivot_cols, r
+        # --- Elimination ---
+        pk, qk = P[k], Q[k]
+        pivot_element = A[pk, qk]
+        
+        # Update the pivot column (these are the multipliers for L)
+        A[P[k+1:], qk] /= pivot_element
+        
+        # Update the rest of the submatrix (Schur complement) using an outer product
+        # This is equivalent to looping but much faster in numpy
+        if k + 1 < n:
+            sub_L_col = A[P[k+1:], qk].reshape(-1, 1)
+            sub_U_row = A[pk, Q[k+1:]].reshape(1, -1)
+            A[np.ix_(P[k+1:], Q[k+1:])] -= sub_L_col @ sub_U_row
+    
+    # If the loop completes, the rank is the smallest dimension
+    r = min(m, n)
+    return A, P, Q, list(Q[:r]), r

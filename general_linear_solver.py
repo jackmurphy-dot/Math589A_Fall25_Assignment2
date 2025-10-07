@@ -45,7 +45,11 @@ def build_nullspace(A, P, Q, r, n, tol):
         rhs = -A[P[:r], Q[r + f]]
         x_b = np.zeros(r, dtype=np.float64)
         for i in range(r - 1, -1, -1):
-            s = np.dot(A[P[i], Q[i + 1:r]], x_b[i + 1:r])
+            # THE FIX: Replaced np.dot with an explicit loop for robustness.
+            s = 0.0
+            for j in range(i + 1, r):
+                s += A[P[i], Q[j]] * x_b[j]
+
             piv = A[P[i], Q[i]]
             if abs(piv) < tol:
                 raise np.linalg.LinAlgError("Singular U block.")

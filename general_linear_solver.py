@@ -7,6 +7,8 @@
 from typing import Tuple, Optional
 import numpy as np
 from plu_decomposition import paq_lu
+from logging_setup import logger
+
 
 Array = np.ndarray
 

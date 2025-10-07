@@ -6,7 +6,7 @@ Array = np.ndarray
 
 def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, List[int], int]:
     """
-    Computes PAQ=LU decomposition using partial pivoting with column exchanges.
+    Computes PAQ=LU decomposition using full pivoting (row and column exchanges).
     """
     A = np.asarray(A, dtype=np.float64, copy=True)
     m, n = A.shape
@@ -16,52 +16,41 @@ def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, 
     # k tracks the number of pivots found, which determines the rank.
     k = 0
     while k < min(m, n):
-        # 1. Partial Pivot Search: Find the best pivot row in the current column k.
-        max_val_in_col = 0.0
-        pivot_row_idx = k
-        for i in range(k, m):
-            current_val = np.abs(A[P[i], Q[k]])
-            if current_val > max_val_in_col:
-                max_val_in_col = current_val
-                pivot_row_idx = i
-
-        # 2. Column Exchange: If pivot is too small, find a new column.
-        if max_val_in_col < tol:
-            found_better_col = False
-            for j_search in range(k + 1, n):
-                # Find best pivot in this new candidate column
-                max_val_in_new_col = 0.0
-                pivot_row_in_new_col = k
-                for i in range(k, m):
-                    val = np.abs(A[P[i], Q[j_search]])
-                    if val > max_val_in_new_col:
-                        max_val_in_new_col = val
-                        pivot_row_in_new_col = i
-                
-                # If this column has a usable pivot, swap it and stop searching.
-                if max_val_in_new_col >= tol:
-                    Q[[k, j_search]] = Q[[j_search, k]]
-                    pivot_row_idx = pivot_row_in_new_col
-                    found_better_col = True
-                    break
-            
-            # If no suitable pivot was found in any column, the rank is k.
-            if not found_better_col:
-                break
-
-        # 3. Row Swap
-        P[[k, pivot_row_idx]] = P[[pivot_row_idx, k]]
+        # 1. Find the absolute maximum element in the active submatrix A[P[k:], Q[k:]]
+        sub_matrix_view = A[np.ix_(P[k:], Q[k:])]
+        i_rel, j_rel = np.unravel_index(np.argmax(np.abs(sub_matrix_view)), sub_matrix_view.shape)
         
+        # 2. Check if the best pivot is too small
+        if np.abs(sub_matrix_view[i_rel, j_rel]) < tol:
+            break # No more pivots found, rank is k.
+
+        # 3. Perform virtual swaps to bring the pivot to the k-th position
+        # Convert relative indices to absolute indices in P and Q
+        pivot_row_idx = k + i_rel
+        pivot_col_idx = k + j_rel
+        
+        P[[k, pivot_row_idx]] = P[[pivot_row_idx, k]]
+        Q[[k, pivot_col_idx]] = Q[[pivot_col_idx, k]]
+
         # 4. Elimination
-        pivot_element = A[P[k], Q[k]]
+        # Get the physical indices of the pivot row/column after swapping
+        pivot_phys_row = P[k]
+        pivot_phys_col = Q[k]
+        pivot_element = A[pivot_phys_row, pivot_phys_col]
+        
+        # Update rows below the pivot
         for i in range(k + 1, m):
-            multiplier = A[P[i], Q[k]] / pivot_element
-            A[P[i], Q[k]] = multiplier # Store L-factor
-            # Update the rest of the row
-            for j in range(k + 1, n):
-                A[P[i], Q[j]] -= multiplier * A[P[k], Q[j]]
-                
+            elim_phys_row = P[i]
+            
+            # Calculate multiplier and store it in-place in the L-factor part
+            multiplier = A[elim_phys_row, pivot_phys_col] / pivot_element
+            A[elim_phys_row, pivot_phys_col] = multiplier
+            
+            # Update the remainder of the row
+            update_cols = Q[k+1:]
+            A[elim_phys_row, update_cols] -= multiplier * A[pivot_phys_row, update_cols]
+        
         k += 1
 
-    r = k # The rank is the number of pivots found
+    r = k
     return A, P, Q, list(Q[:r]), r

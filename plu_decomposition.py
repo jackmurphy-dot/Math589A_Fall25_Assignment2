@@ -6,42 +6,40 @@ Array = np.ndarray
 
 def paq_lu(A: Array, tol: float = 1e-6) -> Tuple[Array, np.ndarray, np.ndarray, List[int], int]:
     """
-    Computes PAQ=LU decomposition using partial pivoting with column exchanges.
+    Computes a standard PLU decomposition (row pivots only).
+    This simplified version is for debugging the non-singular case (P2.2).
     """
     A = np.asarray(A, dtype=np.float64, copy=True)
     m, n = A.shape
     P = np.arange(m)
-    Q = np.arange(n)
-    
-    k = 0
-    while k < min(m, n):
-        i_rel = np.argmax(np.abs(A[P[k:], Q[k]]))
-        i_max = k + i_rel
-        
-        if np.abs(A[P[i_max], Q[k]]) < tol:
-            found_better_col = False
-            for j_search in range(k + 1, n):
-                i_rel_new = np.argmax(np.abs(A[P[k:], Q[j_search]]))
-                pivot_row_in_new_col = k + i_rel_new
-                if np.abs(A[pivot_row_in_new_col, Q[j_search]]) >= tol:
-                    Q[[k, j_search]] = Q[[j_search, k]]
-                    i_max = pivot_row_in_new_col
-                    found_better_col = True
-                    break
-            
-            if not found_better_col:
-                break
+    Q = np.arange(n) # Q will remain the identity matrix [0, 1, 2, ...]
 
-        P[[k, i_max]] = P[[i_max, k]]
+    # Loop over each pivot position
+    for k in range(min(m, n)):
+        # --- Partial Pivoting (Rows Only) ---
+        # Find the row with the largest value in the current column k
+        pivot_row_candidate = k + np.argmax(np.abs(A[P[k:], Q[k]]))
         
+        # Perform the virtual row swap in P
+        P[[k, pivot_row_candidate]] = P[[pivot_row_candidate, k]]
+        
+        # --- Elimination ---
         pivot_element = A[P[k], Q[k]]
-        for i in range(k + 1, m):
-            multiplier = A[P[i], Q[k]] / pivot_element
-            A[P[i], Q[k]] = multiplier
-            for j in range(k + 1, n):
-                A[P[i], Q[j]] -= multiplier * A[P[k], Q[j]]
-                
-        k += 1
+        
+        # If the pivot is zero, the matrix is singular. Stop.
+        if np.abs(pivot_element) < tol:
+            # This indicates the rank is k.
+            r = k
+            return A, P, Q, list(Q[:r]), r
 
-    r = k
+        # Update all rows below the pivot
+        for i in range(k + 1, m):
+            # Calculate the multiplier
+            multiplier = A[P[i], Q[k]] / pivot_element
+            # Store the multiplier in the L factor part of A
+            A[P[i], Q[k]] = multiplier
+            # Update the rest of the row
+            A[P[i], Q[k+1:]] -= multiplier * A[P[k], Q[k+1:]]
+
+    r = min(m, n)
     return A, P, Q, list(Q[:r]), r

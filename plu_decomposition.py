@@ -4,6 +4,8 @@
 
 from typing import Tuple, List
 import numpy as np
+from logging_setup import logger
+
 
 Array = np.ndarray
 

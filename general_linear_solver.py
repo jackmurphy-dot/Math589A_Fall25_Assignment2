@@ -11,20 +11,16 @@ def forward_substitution(A, P, Q, b, r):
     y = np.zeros(m, dtype=np.float64)
     b_perm = b[P]
     for i in range(m):
-        s = 0.0
-        for j in range(min(i, r)):
-            s += A[P[i], Q[j]] * y[j]
+        s = np.dot(A[P[i], Q[:min(i, r)]], y[:min(i, r)])
         y[i] = b_perm[i] - s
     return y
 
 
 def backward_substitution(A, P, Q, y, r, tol):
-    """Solve U x_b = y_b (upper-triangular)."""
+    """Solve U_basic x_basic = y_basic (upper-triangular)."""
     x_b = np.zeros(r, dtype=np.float64)
     for i in range(r - 1, -1, -1):
-        s = 0.0
-        for j in range(i + 1, r):
-            s += A[P[i], Q[j]] * x_b[j]
+        s = np.dot(A[P[i], Q[i + 1:r]], x_b[i + 1:r])
         piv = A[P[i], Q[i]]
         if abs(piv) < tol:
             raise np.linalg.LinAlgError("Singular pivot.")
@@ -34,34 +30,26 @@ def backward_substitution(A, P, Q, y, r, tol):
 
 def build_nullspace(A, P, Q, r, n, tol):
     """Construct basis of the nullspace of A."""
-    k = max(n - r, 0)
-    N = np.zeros((n, k), dtype=np.float64)
-    if k == 0:
-        return N
+    num_free = n - r
+    if num_free <= 0:
+        return np.zeros((n, 0), dtype=np.float64)
+    
+    # THE FIX: This handles the r=0 case correctly and robustly.
     if r == 0:
-        return np.eye(n, k, dtype=np.float64)
+        return np.eye(n, num_free, dtype=np.float64)
 
-    for f in range(k):
-        # For each free variable, solve for the basic variables
-        rhs = -A[P[:r], Q[r + f]]
-        x_b = np.zeros(r, dtype=np.float64)
-
-        # Perform back-substitution to find the basic variables of the null space vector
-        for i in range(r - 1, -1, -1):
-            s = 0.0
-            for j in range(i + 1, r):
-                s += A[P[i], Q[j]] * x_b[j]
-            
-            piv = A[P[i], Q[i]]
-            if abs(piv) < tol:
-                raise np.linalg.LinAlgError("Singular U block in nullspace calculation.")
-            x_b[i] = (rhs[i] - s) / piv
-        
-        # Assemble the full null space vector
-        col = np.zeros(n, dtype=np.float64)
-        col[Q[:r]] = x_b      # Set basic variables
-        col[Q[r + f]] = 1.0  # Set the current free variable to 1
-        N[:, f] = col
+    # U_basic is A[P[:r], Q[:r]], U_free is A[P[:r], Q[r:]]
+    U_basic_inv = np.linalg.inv(np.triu(A[np.ix_(P[:r], Q[:r])]))
+    U_free = A[np.ix_(P[:r], Q[r:])]
+    
+    # The core of the nullspace is the solution to U_basic * z_basic = -U_free
+    N_permuted = -U_basic_inv @ U_free
+    
+    # Assemble the full nullspace matrix N
+    N = np.zeros((n, num_free))
+    N[Q[:r], :] = N_permuted
+    N[Q[r:], :] = np.eye(num_free)
+    
     return N
 
 
@@ -77,80 +65,19 @@ def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array
     if b_in.shape[0] != m:
         raise ValueError("Dimension mismatch between A and b")
 
-    # The PAQ=LU function works on a copy
     A_fac, P, Q, _, r = paq_lu(A_in, tol=tol)
 
-    # Step 1: Solve Ly = Pb
     y = forward_substitution(A_fac, P, Q, b_in, r)
 
-    # Step 2: Check for consistency
     if r < m and np.any(np.abs(y[r:]) > tol):
         N = build_nullspace(A_fac, P, Q, r, n, tol)
         return None, N
 
-    # Step 3: Solve U_basic * z_basic = y_basic for the particular solution
     z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
 
-    # Step 4: Reconstruct the full particular solution vector c from z_basic
     c = np.zeros(n, dtype=np.float64)
     c[Q[:r]] = z_basic
 
-    # Step 5: Find the nullspace basis
-    N = build_nullspace(A_fac, P, Q, r, n, tol)
-    
-    return c, N
-
-def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array]:
-    """
-    Solve A x = b returning (c, N):
-      - c: particular solution (or None if inconsistent)
-      - N: nullspace basis
-    """
-    A_in = np.asarray(A, dtype=np.float64)
-    b_in = np.asarray(b, dtype=np.float64).reshape(-1)
-    m, n = A_in.shape
-    if b_in.shape[0] != m:
-        raise ValueError("Dimension mismatch between A and b")
-
-    # Add this to see the inputs
-    logger.info(f"--- Solving New System ---")
-    logger.info(f"Input A shape: {A_in.shape}")
-    logger.info(f"Input b shape: {b_in.shape}")
-
-    # The PAQ=LU function works on a copy
-    A_fac, P, Q, _, r = paq_lu(A_in, tol=tol)
-
-    # Add this to see the result of the decomposition
-    logger.info(f"Decomposition rank r = {r}")
-    logger.info(f"Row Permutation P = {P}")
-    logger.info(f"Column Permutation Q = {Q}")
-
-    # Step 1: Solve Ly = Pb
-    y = forward_substitution(A_fac, P, Q, b_in, r)
-    
-    # Add this to see the result of forward substitution
-    logger.info(f"Intermediate vector y = {y}")
-
-    # Step 2: Check for consistency
-    if r < m and np.any(np.abs(y[r:]) > tol):
-        logger.warning(f"System is INCONSISTENT. y[r:] = {y[r:]}")
-        N = build_nullspace(A_fac, P, Q, r, n, tol)
-        return None, N
-
-    # Step 3: Solve U_basic * z_basic = y_basic
-    z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
-    
-    # Add this to see the basic variables
-    logger.info(f"Basic variables z_basic = {z_basic}")
-
-    # Step 4: Reconstruct the full particular solution vector c
-    c = np.zeros(n, dtype=np.float64)
-    c[Q[:r]] = z_basic
-
-    # Add this to see the final particular solution before returning
-    logger.info(f"Final particular solution c = {c}")
-
-    # Step 5: Find the nullspace basis
     N = build_nullspace(A_fac, P, Q, r, n, tol)
     
     return c, N

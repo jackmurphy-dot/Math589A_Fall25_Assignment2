@@ -99,3 +99,58 @@ def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array
     N = build_nullspace(A_fac, P, Q, r, n, tol)
     
     return c, N
+
+def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array]:
+    """
+    Solve A x = b returning (c, N):
+      - c: particular solution (or None if inconsistent)
+      - N: nullspace basis
+    """
+    A_in = np.asarray(A, dtype=np.float64)
+    b_in = np.asarray(b, dtype=np.float64).reshape(-1)
+    m, n = A_in.shape
+    if b_in.shape[0] != m:
+        raise ValueError("Dimension mismatch between A and b")
+
+    # Add this to see the inputs
+    logger.info(f"--- Solving New System ---")
+    logger.info(f"Input A shape: {A_in.shape}")
+    logger.info(f"Input b shape: {b_in.shape}")
+
+    # The PAQ=LU function works on a copy
+    A_fac, P, Q, _, r = paq_lu(A_in, tol=tol)
+
+    # Add this to see the result of the decomposition
+    logger.info(f"Decomposition rank r = {r}")
+    logger.info(f"Row Permutation P = {P}")
+    logger.info(f"Column Permutation Q = {Q}")
+
+    # Step 1: Solve Ly = Pb
+    y = forward_substitution(A_fac, P, Q, b_in, r)
+    
+    # Add this to see the result of forward substitution
+    logger.info(f"Intermediate vector y = {y}")
+
+    # Step 2: Check for consistency
+    if r < m and np.any(np.abs(y[r:]) > tol):
+        logger.warning(f"System is INCONSISTENT. y[r:] = {y[r:]}")
+        N = build_nullspace(A_fac, P, Q, r, n, tol)
+        return None, N
+
+    # Step 3: Solve U_basic * z_basic = y_basic
+    z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
+    
+    # Add this to see the basic variables
+    logger.info(f"Basic variables z_basic = {z_basic}")
+
+    # Step 4: Reconstruct the full particular solution vector c
+    c = np.zeros(n, dtype=np.float64)
+    c[Q[:r]] = z_basic
+
+    # Add this to see the final particular solution before returning
+    logger.info(f"Final particular solution c = {c}")
+
+    # Step 5: Find the nullspace basis
+    N = build_nullspace(A_fac, P, Q, r, n, tol)
+    
+    return c, N

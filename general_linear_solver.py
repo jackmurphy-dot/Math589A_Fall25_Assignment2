@@ -59,7 +59,7 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         N[Q[:r], j] = -z
         N[free_col, j] = 1.0
 
-       # --- Force N to be 2-D no matter what ---
+    # --- Force N to be 2-D no matter what ---
     N = np.atleast_2d(np.asarray(N, dtype=float))
     # Ensure it has the correct orientation (n rows)
     if N.shape[0] != n:

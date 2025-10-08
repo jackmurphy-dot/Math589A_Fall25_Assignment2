@@ -27,7 +27,8 @@ def paq_lu(A: Array, tol: float = 1e-10) -> Tuple[Array, np.ndarray, np.ndarray,
         sub_max = sub.max()
 
         # If the ENTIRE active submatrix is (numerically) zero, stop.
-        if sub_max <= tol:
+        if sub_max <= max(tol, 1e-12 * np.max(np.abs(A))):
+
             break
 
         # Pick (global) max pivot within the active submatrix

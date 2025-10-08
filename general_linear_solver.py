@@ -74,4 +74,13 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
     if not consistent:
         c = None
 
+    # --- Final safeguard: ensure N is always 2-D ---
+    if N.ndim == 1:
+        N = N.reshape(-1, 1)
+    elif N.shape == (0,):   # completely empty
+        N = np.zeros((n, 0), dtype=float)
+    elif N.shape[0] != n:
+        N = N.T
+    N = np.atleast_2d(N)
+
     return N, c

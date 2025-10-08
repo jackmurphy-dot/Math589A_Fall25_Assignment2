@@ -6,62 +6,68 @@ from plu_decomposition import paq_lu
 Array = np.ndarray
 
 def forward_substitution(A, P, Q, b, r):
-    """Solves L y = P b, where L has an implicit unit diagonal."""
+    """Solve L y = P b for y, where L has implicit unit diagonal."""
     m = len(P)
-    y = np.zeros(m, dtype=np.float64)
-    b_permuted = b[P]
-    for i in range(m):
-        sum_val = np.dot(A[P[i], Q[:min(i, r)]], y[:min(i, r)])
-        y[i] = b_permuted[i] - sum_val
+    y = np.zeros(m)
+    b_perm = b[P]
+    for i in range(r):
+        y[i] = b_perm[i] - np.dot(A[P[i], Q[:i]], y[:i])
     return y
 
-def backward_substitution(A, P, Q, y_slice, r, tol):
-    """Solves U z = y_slice for the permuted solution z."""
-    z = np.zeros(r, dtype=np.float64)
+def backward_substitution(A, P, Q, y, r, tol=1e-10):
+    """Solve U z = y for z (upper triangular system)."""
+    z = np.zeros(r)
     for i in range(r - 1, -1, -1):
-        sum_val = np.dot(A[P[i], Q[i + 1:r]], z[i + 1:r])
-        pivot = A[P[i], Q[i]]
-        if abs(pivot) < tol:
-            raise np.linalg.LinAlgError("Matrix is singular.")
-        z[i] = (y_slice[i] - sum_val) / pivot
+        piv = A[P[i], Q[i]]
+        if abs(piv) < tol:
+            raise np.linalg.LinAlgError("Singular matrix.")
+        z[i] = (y[i] - np.dot(A[P[i], Q[i + 1:r]], z[i + 1:r])) / piv
     return z
 
-def build_nullspace(A, P, Q, r, n, tol):
-    """Dummy function for the simplified test. Not used for P2.2."""
-    num_free_vars = n - r
-    return np.zeros((n, num_free_vars), dtype=np.float64)
+def build_nullspace(A, P, Q, r, n, tol=1e-10):
+    """Construct a nullspace basis for A."""
+    num_free = n - r
+    if num_free <= 0:
+        return np.zeros((n, 0))
 
-def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array]:
+    N = np.zeros((n, num_free))
+    # Free columns correspond to Q[r:]
+    for j, free_col in enumerate(Q[r:]):
+        e = np.zeros(n)
+        e[free_col] = 1.0
+        # Backward substitution for dependent vars
+        z = -backward_substitution(A, P, Q, A[P[:r], free_col], r, tol)
+        e[Q[:r]] = z
+        N[:, j] = e
+    return N
+
+def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Optional[Array], Array]:
     """
-    Simplified solver for the square, non-singular case (P2.2).
+    General linear solver using PLU decomposition.
+    Returns (particular_solution, nullspace_basis).
     """
-    A_input = np.asarray(A, dtype=np.float64)
-    b_input = np.asarray(b, dtype=np.float64).reshape(-1)
-    m, n = A_input.shape
-    
-    # For P2.2, we expect a non-singular square matrix
-    if m != n:
-        # Fallback to a robust nullspace for other tests
-        return None, np.eye(n)
+    A = np.array(A, dtype=float)
+    b = np.array(b, dtype=float).reshape(-1)
+    m, n = A.shape
 
-    A_fac, P, Q, _, r = paq_lu(A_input, tol=tol)
+    A_fac, P, Q, r = paq_lu(A, tol)
 
-    # If paq_lu finds the matrix to be singular, we can't find a unique solution
-    if r < n:
-        # This case shouldn't be hit by test P2.2
-        return None, build_nullspace(A_fac, P, Q, r, n, tol)
+    # Forward substitution: solve L y = P b
+    y = forward_substitution(A_fac, P, Q, b, r)
 
-    # Solve Ly = Pb
-    y = forward_substitution(A_fac, P, Q, b_input, r)
+    # Compute particular solution
+    if r > 0:
+        z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
+        c = np.zeros(n)
+        c[Q[:r]] = z_basic
+    else:
+        c = np.zeros(n)
 
-    # Solve Uz = y
-    z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
+    # Nullspace basis
+    N = build_nullspace(A_fac, P, Q, r, n, tol)
 
-    # Assemble the particular solution c
-    c = np.zeros(n, dtype=np.float64)
-    c[Q[:r]] = z_basic
+    # If non-singular (r == n), nullspace is empty
+    if r == n:
+        N = np.zeros((n, 0))
 
-    # For a non-singular matrix, the nullspace is empty
-    N = np.zeros((n, 0), dtype=np.float64)
-    
     return c, N

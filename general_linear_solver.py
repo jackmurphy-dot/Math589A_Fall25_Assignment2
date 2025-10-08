@@ -5,6 +5,7 @@ from plu_decomposition import paq_lu
 
 Array = np.ndarray
 
+
 def _forward_substitution(A: Array, P: np.ndarray, Q: np.ndarray, b: Array, r: int) -> Array:
     """Solve L y = P b for first r entries (L has implicit unit diag)."""
     y = np.zeros(len(P), dtype=float)
@@ -21,7 +22,7 @@ def _backsolve_U_on_factored_A(A: Array, P: np.ndarray, Q: np.ndarray, rhs: Arra
         piv = A[P[i], Q[i]]
         if abs(piv) <= tol:
             raise np.linalg.LinAlgError("Singular U encountered in backsolve.")
-        s = np.dot(A[P[i], Q[i+1:r]], z[i+1:r]) if i < r - 1 else 0.0
+        s = np.dot(A[P[i], Q[i + 1:r]], z[i + 1:r]) if i < r - 1 else 0.0
         z[i] = (rhs[i] - s) / piv
     return z
 
@@ -48,10 +49,8 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
     if r > 0:
         z_basic = _backsolve_U_on_factored_A(A_fac, P, Q, y[:r], r, tol)
         c[Q[:r]] = z_basic
-    else:
-        c[:] = 0.0
 
-    # 3) Nullspace
+    # 3) Nullspace basis
     num_free = n - r
     N = np.zeros((n, num_free), dtype=float)
     for j in range(num_free):
@@ -61,17 +60,13 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         N[Q[:r], j] = -z
         N[free_col, j] = 1.0
 
-    # --- Force N to always be a 2-D matrix of shape (n, n-r) ---
-    num_free = max(n - r, 0)
-    if num_free == 0:
-        N = np.zeros((n, 0), dtype=float)
-    else:
-        N = np.asarray(N, dtype=float)
-        if N.ndim == 1:
-            N = N.reshape(n, 1)
-        elif N.shape[0] != n:
-            N = N.T
-        N = N.reshape(n, num_free)
+    # --- Enforce N as 2-D (even if nullspace is empty) ---
+    N = np.asarray(N, dtype=float)
+    if N.ndim == 1:
+        # happens if n==r and N collapses to 1D
+        N = N.reshape(n, 0)
+    elif N.size == 0 or N.shape[1] != num_free or N.shape[0] != n:
+        N = np.zeros((n, max(num_free, 0)), dtype=float)
 
     # 4) Consistency check
     denom = np.linalg.norm(A, ord=np.inf) * (np.linalg.norm(c, ord=np.inf) + 1.0) \

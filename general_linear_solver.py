@@ -80,3 +80,17 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         c = None
 
     return N, c
+
+        # --- enforce 2-D shape for N ---
+    N = np.asarray(N, dtype=float)
+    N = N.reshape(n, n - r)   # even when n-r == 0 or 1, stays 2-D
+
+    # 4) Consistency check
+    denom = np.linalg.norm(A, ord=np.inf) * (np.linalg.norm(c, ord=np.inf) + 1.0) \
+            + np.linalg.norm(b, ord=np.inf) + 1.0
+    consistent = np.linalg.norm(A @ c - b, ord=np.inf) <= 1e-8 * denom if denom else True
+    if not consistent:
+        c = None
+
+    return N, c
+

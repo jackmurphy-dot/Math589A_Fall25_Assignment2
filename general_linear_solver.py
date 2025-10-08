@@ -59,8 +59,13 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         N[Q[:r], j] = -z
         N[free_col, j] = 1.0
 
-    # --- Always enforce shape (n, n-r) ---
-    N = np.asarray(N, dtype=float).reshape(n, n - r)
+       # --- Force N to be 2-D no matter what ---
+    N = np.atleast_2d(np.asarray(N, dtype=float))
+    # Ensure it has the correct orientation (n rows)
+    if N.shape[0] != n:
+        N = N.T
+    # Now explicitly reshape so shape == (n, n-r)
+    N = N.reshape(n, n - r)
 
     # 4) Consistency check
     denom = np.linalg.norm(A, ord=np.inf) * (np.linalg.norm(c, ord=np.inf) + 1.0) \

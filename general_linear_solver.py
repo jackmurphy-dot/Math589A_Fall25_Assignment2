@@ -29,7 +29,7 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
     Solve A x = b via PAQ = LU with row+column pivoting.
 
     Returns:
-        N : (n x (n-r)) nullspace basis
+        N : (n x (n-r)) nullspace basis (always 2-D)
         c : (n,) particular solution with free vars = 0, or None if inconsistent
     """
     A = np.asarray(A, dtype=float)
@@ -41,7 +41,7 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
     # 1) Forward: L y = P b
     y = _forward_substitution(A_fac, P, Q, b, r)
 
-    # 2) Particular solution: U z = y[:r], then x = Q [z; 0]
+    # 2) Particular solution
     c = np.zeros(n, dtype=float)
     if r > 0:
         z_basic = _backsolve_U_on_factored_A(A_fac, P, Q, y[:r], r, tol)
@@ -49,41 +49,18 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
     else:
         c[:] = 0.0
 
-    # 3) Nullspace: for each free column, solve U z = U(:, free) on pivot rows
+    # 3) Nullspace
     num_free = n - r
-    if num_free > 0:
-        N = np.zeros((n, num_free), dtype=float)
-        for j in range(num_free):
-            free_col = Q[r + j]               # original index of this free variable
-            rhs = A_fac[P[:r], free_col]      # U_F's j-th column on pivot rows
-            z = _backsolve_U_on_factored_A(A_fac, P, Q, rhs, r, tol) if r > 0 else np.zeros(0)
-            N[Q[:r], j] = -z
-            N[free_col, j] = 1.0
-    else:
-        N = np.zeros((n, 0), dtype=float)
+    N = np.zeros((n, num_free), dtype=float)
+    for j in range(num_free):
+        free_col = Q[r + j]
+        rhs = A_fac[P[:r], free_col]
+        z = _backsolve_U_on_factored_A(A_fac, P, Q, rhs, r, tol) if r > 0 else np.zeros(0)
+        N[Q[:r], j] = -z
+        N[free_col, j] = 1.0
 
-    # --- enforce 2D shape for N (important for nullity = 1 or 0) ---
-    N = np.asarray(N, dtype=float)
-    if N.ndim == 1:
-        N = N.reshape(n, 1)  # make it (n,1) instead of (n,)
-    elif N.shape[0] != n:
-        N = N.reshape(n, -1) # defensive
-
-    # 4) Consistency check for c
-    # If residual is large relative to data, return None for c.
-    denom = np.linalg.norm(A, ord=np.inf) * (np.linalg.norm(c, ord=np.inf) + 1.0) + np.linalg.norm(b, ord=np.inf) + 1.0
-    if denom == 0:
-        consistent = True
-    else:
-        consistent = np.linalg.norm(A @ c - b, ord=np.inf) <= 1e-8 * denom
-    if not consistent:
-        c = None
-
-    return N, c
-
-        # --- enforce 2-D shape for N ---
-    N = np.asarray(N, dtype=float)
-    N = N.reshape(n, n - r)   # even when n-r == 0 or 1, stays 2-D
+    # --- Always enforce shape (n, n-r) ---
+    N = np.asarray(N, dtype=float).reshape(n, n - r)
 
     # 4) Consistency check
     denom = np.linalg.norm(A, ord=np.inf) * (np.linalg.norm(c, ord=np.inf) + 1.0) \
@@ -93,4 +70,3 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         c = None
 
     return N, c
-

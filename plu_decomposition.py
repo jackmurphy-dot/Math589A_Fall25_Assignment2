@@ -4,7 +4,7 @@ from logging_setup import logger
 
 Array = np.ndarray
 
-def paq_lu(A: Array, tol: float = 1e-10) -> Tuple[Array, np.ndarray, np.ndarray, int]:
+def paq_lu(A: Array, tol: float = 1e-8) -> Tuple[Array, np.ndarray, np.ndarray, int]:
     """
     In-place PAQ = LU with partial pivoting over both rows and columns.
     - Row exchanges are simulated with the permutation vector P.

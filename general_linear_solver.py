@@ -5,54 +5,45 @@ from plu_decomposition import paq_lu
 
 Array = np.ndarray
 
-def _forward_substitution_Ly_eq_Pb(A: Array, P: np.ndarray, Q: np.ndarray, b: Array, r: int) -> Array:
+def _forward_substitution(A: Array, P: np.ndarray, Q: np.ndarray, b: Array, r: int) -> Array:
     """
-    Solve L y = P b for the first r components (L has unit diagonal).
-    IMPORTANT: L is stored in A on columns Q[:r]; the strictly lower triangle
-    of L at step i is in A[P[i], Q[:i]].
+    Solve L y = P b for first r entries (L has implicit unit diagonal).
+    L[i, j] for j<i is stored in A at (P[i], Q[j]).
     """
-    m = len(P)
-    y = np.zeros(m, dtype=float)
-    b_perm = b[P]
+    y = np.zeros(len(P), dtype=float)
+    bp = b[P]
     for i in range(r):
-        # L[i, :i] dot y[:i]  where L[i, j] is stored at A[P[i], Q[j]]
         if i > 0:
-            y[i] = b_perm[i] - np.dot(A[P[i], Q[:i]], y[:i])
+            y[i] = bp[i] - np.dot(A[P[i], Q[:i]], y[:i])
         else:
-            y[i] = b_perm[i]
+            y[i] = bp[i]
     return y
 
-def _extract_UB_UF(A: Array, P: np.ndarray, Q: np.ndarray, r: int, n: int) -> Tuple[Array, Array]:
+def _backsolve_U_on_factored_A(A: Array, P: np.ndarray, Q: np.ndarray, rhs: Array, r: int, tol: float) -> Array:
     """
-    Build U_B (r x r) and U_F (r x (n-r)) from the factored A using P and Q.
-    U_B is the leading r pivot-columns restricted to the first r pivot-rows,
-    and is upper-triangular (up to small roundoff).
+    Solve U z = rhs where U is the r x r upper-triangular block read from A
+    using rows P[:r] and columns Q[:r] (no dense reconstruction of U_B).
     """
-    if r == 0:
-        return np.zeros((0, 0)), np.zeros((0, n))
+    z = np.zeros(r, dtype=float)
+    for i in range(r - 1, -1, -1):
+        piv = A[P[i], Q[i]]
+        if abs(piv) < tol:
+            raise np.linalg.LinAlgError("Singular U encountered in backsolve.")
+        if i < r - 1:
+            rhs_i = rhs[i] - np.dot(A[P[i], Q[i+1:r]], z[i+1:r])
+        else:
+            rhs_i = rhs[i]
+        z[i] = rhs_i / piv
+    return z
 
-    # U_B rows are P[:r], cols are Q[:r]
-    U_B = A[P[:r], :][:, Q[:r]].copy()
-    # Ensure upper-triangular numerically
-    U_B = np.triu(U_B)
-
-    # U_F rows are same pivot rows, cols are Q[r:]
-    if n > r:
-        U_F = A[P[:r], :][:, Q[r:]].copy()
-    else:
-        U_F = np.zeros((r, 0))
-
-    return U_B, U_F
-
-def solve(A: Array, b: Array, tol: float = 1e-8) -> Tuple[Optional[Array], Array]:
+def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Optional[Array], Array]:
     """
-    Solve A x = b using PAQ = LU with BOTH row and column pivoting.
+    Solve A x = b via PAQ = LU with full pivoting.
     Returns:
-        c : one particular solution (n,) with free vars set to zero; or None if no pivot found
-        N : nullspace basis (n x (n - r)) mapping free params to full solutions
-    Notes:
-        From derivation.tex:
-            x = Q [ U_B^{-1} (L^{-1} P b)_pivot ; 0 ] + Q [ -U_B^{-1} U_F ; I ] x_free
+        c : particular solution (n,), free variables set to 0
+        N : nullspace basis (n x (n - r))
+    Implementation mirrors derivation.tex, but *does not* rebuild dense U_B/U_F.
+    Instead, it backsolves directly against the factored A with P,Q for stability.
     """
     A = np.asarray(A, dtype=float)
     b = np.asarray(b, dtype=float).reshape(-1)
@@ -60,35 +51,26 @@ def solve(A: Array, b: Array, tol: float = 1e-8) -> Tuple[Optional[Array], Array
 
     A_fac, P, Q, r = paq_lu(A, tol=tol)
 
-    # If rank is 0, particular solution is zero only if b is zero in pivot rows (none exist);
-    # we return c = zeros (conventional) and N spans entire space.
-    # The general code below already handles this.
-    # 1) Ly = P b  (compute the first r entries of y consistently with L storage)
-    y = _forward_substitution_Ly_eq_Pb(A_fac, P, Q, b, r)
+    # 1) L y = P b, only first r entries matter downstream
+    y = _forward_substitution(A_fac, P, Q, b, r)
 
-    # 2) Extract U_B (pivot block) and U_F (free block)
-    U_B, U_F = _extract_UB_UF(A_fac, P, Q, r, n)
-
-    # 3) Particular solution: x_B solves U_B x_B = y[:r]
+    # 2) Particular solution: U z = y[:r], then place z into the pivot variables
     c = np.zeros(n, dtype=float)
     if r > 0:
-        # Solve upper-triangular system robustly
-        # (np.linalg.solve will also work since U_B is triangular and invertible)
-        x_B = np.linalg.solve(U_B, y[:r])
-        # Map from reordered (pivot-first) coordinates back to original variable order: x = Q x'
-        # Here c' = [x_B ; 0], so c[Q[:r]] = x_B
-        c[Q[:r]] = x_B
-        # The free positions Q[r:] remain zero -> that's fine for a particular solution
+        z_basic = _backsolve_U_on_factored_A(A_fac, P, Q, y[:r], r, tol)
+        c[Q[:r]] = z_basic  # x = Q [z; 0]
 
-    # 4) Nullspace: N = Q [ -U_B^{-1} U_F ; I_{n-r} ]
-    if n > r:
-        UB_inv_UF = np.linalg.solve(U_B, U_F) if r > 0 else np.zeros((0, n - r))
-        top = -UB_inv_UF                      # shape (r, n-r)
-        bottom = np.eye(n - r)                # shape (n-r, n-r)
-        N_reordered = np.vstack([top, bottom])  # shape (n, n-r) in pivot-first variable order
-        # Map back to original column order: x = Q x'
-        N = np.zeros((n, n - r), dtype=float)
-        N[Q, :] = N_reordered
+    # 3) Nullspace: for each free column j, solve U z = U(:, free_j) on pivot rows, then top is -z, bottom is e_j
+    num_free = n - r
+    if num_free > 0:
+        N = np.zeros((n, num_free), dtype=float)
+        for j in range(num_free):
+            col_idx = Q[r + j]              # physical column index of the j-th free var
+            rhs = A_fac[P[:r], col_idx]     # this is U(:, free) restricted to pivot rows
+            z = _backsolve_U_on_factored_A(A_fac, P, Q, rhs, r, tol)
+            # Place into N in original variable order:
+            N[Q[:r], j] = -z
+            N[col_idx, j] = 1.0
     else:
         N = np.zeros((n, 0), dtype=float)
 

@@ -13,6 +13,7 @@ def _forward_substitution(A: Array, P: np.ndarray, Q: np.ndarray, b: Array, r: i
         y[i] = bp[i] - (np.dot(A[P[i], Q[:i]], y[:i]) if i > 0 else 0.0)
     return y
 
+
 def _backsolve_U_on_factored_A(A: Array, P: np.ndarray, Q: np.ndarray, rhs: Array, r: int, tol: float) -> Array:
     """Solve U z = rhs using rows P[:r] and cols Q[:r] (no dense rebuild)."""
     z = np.zeros(r, dtype=float)
@@ -23,6 +24,7 @@ def _backsolve_U_on_factored_A(A: Array, P: np.ndarray, Q: np.ndarray, rhs: Arra
         s = np.dot(A[P[i], Q[i+1:r]], z[i+1:r]) if i < r - 1 else 0.0
         z[i] = (rhs[i] - s) / piv
     return z
+
 
 def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array]]:
     """
@@ -59,13 +61,17 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         N[Q[:r], j] = -z
         N[free_col, j] = 1.0
 
-    # --- Force N to be 2-D no matter what ---
-    N = np.atleast_2d(np.asarray(N, dtype=float))
-    # Ensure it has the correct orientation (n rows)
-    if N.shape[0] != n:
-        N = N.T
-    # Now explicitly reshape so shape == (n, n-r)
-    N = N.reshape(n, n - r)
+    # --- Force N to always be a 2-D matrix of shape (n, n-r) ---
+    num_free = max(n - r, 0)
+    if num_free == 0:
+        N = np.zeros((n, 0), dtype=float)
+    else:
+        N = np.asarray(N, dtype=float)
+        if N.ndim == 1:
+            N = N.reshape(n, 1)
+        elif N.shape[0] != n:
+            N = N.T
+        N = N.reshape(n, num_free)
 
     # 4) Consistency check
     denom = np.linalg.norm(A, ord=np.inf) * (np.linalg.norm(c, ord=np.inf) + 1.0) \
@@ -73,14 +79,5 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
     consistent = np.linalg.norm(A @ c - b, ord=np.inf) <= 1e-8 * denom if denom else True
     if not consistent:
         c = None
-
-    # --- Final safeguard: ensure N is always 2-D ---
-    if N.ndim == 1:
-        N = N.reshape(-1, 1)
-    elif N.shape == (0,):   # completely empty
-        N = np.zeros((n, 0), dtype=float)
-    elif N.shape[0] != n:
-        N = N.T
-    N = np.atleast_2d(N)
 
     return N, c

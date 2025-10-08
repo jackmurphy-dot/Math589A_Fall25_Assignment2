@@ -6,7 +6,7 @@ from plu_decomposition import paq_lu
 Array = np.ndarray
 
 def forward_substitution(A, P, Q, b, r):
-    """Solve L y = P b for y, where L has implicit unit diagonal."""
+    """Solve L y = P b for y (L has implicit unit diagonal)."""
     m = len(P)
     y = np.zeros(m)
     b_perm = b[P]
@@ -15,35 +15,18 @@ def forward_substitution(A, P, Q, b, r):
     return y
 
 def backward_substitution(A, P, Q, y, r, tol=1e-10):
-    """Solve U z = y for z (upper triangular system)."""
+    """Solve U z = y for z (upper triangular)."""
     z = np.zeros(r)
     for i in range(r - 1, -1, -1):
         piv = A[P[i], Q[i]]
         if abs(piv) < tol:
-            raise np.linalg.LinAlgError("Singular matrix.")
+            raise np.linalg.LinAlgError("Singular matrix in backward substitution.")
         z[i] = (y[i] - np.dot(A[P[i], Q[i + 1:r]], z[i + 1:r])) / piv
     return z
 
-def build_nullspace(A, P, Q, r, n, tol=1e-10):
-    """Construct a nullspace basis for A."""
-    num_free = n - r
-    if num_free <= 0:
-        return np.zeros((n, 0))
-
-    N = np.zeros((n, num_free))
-    # Free columns correspond to Q[r:]
-    for j, free_col in enumerate(Q[r:]):
-        e = np.zeros(n)
-        e[free_col] = 1.0
-        # Backward substitution for dependent vars
-        z = -backward_substitution(A, P, Q, A[P[:r], free_col], r, tol)
-        e[Q[:r]] = z
-        N[:, j] = e
-    return N
-
 def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Optional[Array], Array]:
     """
-    General linear solver using PLU decomposition.
+    Solve A x = b using the PAQ = LU factorization.
     Returns (particular_solution, nullspace_basis).
     """
     A = np.array(A, dtype=float)
@@ -52,22 +35,35 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Optional[Array], Arra
 
     A_fac, P, Q, r = paq_lu(A, tol)
 
-    # Forward substitution: solve L y = P b
+    # Forward substitution (L y = P b)
     y = forward_substitution(A_fac, P, Q, b, r)
 
-    # Compute particular solution
+    # Extract U_B and U_F blocks (pivot and free columns)
+    U_B = np.zeros((r, r))
+    for i in range(r):
+        U_B[i, :] = A_fac[P[i], Q[:r]]
+    U_B = np.triu(U_B)
+
+    U_F = np.zeros((r, n - r))
+    if n > r:
+        for i in range(r):
+            U_F[i, :] = A_fac[P[i], Q[r:]]
+
+    # Particular solution: U_B * x_B = y[:r]
+    c = np.zeros(n)
     if r > 0:
-        z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
-        c = np.zeros(n)
-        c[Q[:r]] = z_basic
+        x_B = np.linalg.solve(U_B, y[:r])
+        c[Q[:r]] = x_B
+
+    # Nullspace matrix N = Q [ -U_B^{-1} U_F ; I ]
+    if n > r:
+        UB_inv_UF = np.linalg.solve(U_B, U_F)
+        top = -UB_inv_UF
+        bottom = np.eye(n - r)
+        N_reordered = np.vstack((top, bottom))  # shape (n, n-r) but permuted
+        N = np.zeros((n, n - r))
+        N[Q, :] = N_reordered  # undo Q permutation
     else:
-        c = np.zeros(n)
-
-    # Nullspace basis
-    N = build_nullspace(A_fac, P, Q, r, n, tol)
-
-    # If non-singular (r == n), nullspace is empty
-    if r == n:
         N = np.zeros((n, 0))
 
     return c, N

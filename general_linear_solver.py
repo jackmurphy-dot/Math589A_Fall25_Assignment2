@@ -44,7 +44,7 @@ def _extract_UB_UF(A: Array, P: np.ndarray, Q: np.ndarray, r: int, n: int) -> Tu
 
     return U_B, U_F
 
-def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Optional[Array], Array]:
+def solve(A: Array, b: Array, tol: float = 1e-8) -> Tuple[Optional[Array], Array]:
     """
     Solve A x = b using PAQ = LU with BOTH row and column pivoting.
     Returns:

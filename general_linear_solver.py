@@ -1,7 +1,8 @@
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from logging_setup import logger
 from plu_decomposition import paq_lu
+
 
 Array = np.ndarray
 
@@ -28,14 +29,14 @@ def _backsolve_U_on_factored_A(A: Array, P: np.ndarray, Q: np.ndarray,
     return z
 
 
-def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array]]:
+def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[list, Optional[list]]:
     """
     Solve A x = b via PAQ = LU with row+column pivoting.
 
     Returns
     -------
-    N : (n x (n-r)) nullspace basis (always 2-D)
-    c : (n,) particular solution or None if inconsistent
+    N : list of lists, shape (n x (n-r))  -- nullspace basis (always 2-D)
+    c : list, shape (n,)  -- particular solution or None if inconsistent
     """
     A = np.asarray(A, dtype=float)
     b = np.asarray(b, dtype=float).reshape(-1)
@@ -62,22 +63,19 @@ def solve(A: Array, b: Array, tol: float = 1e-10) -> Tuple[Array, Optional[Array
         N[Q[:r], j] = -z
         N[free_col, j] = 1.0
 
-    # --- Ensure N is *always* 2-D of shape (n, n-r) ---
-    num_free = max(num_free, 0)
-    if N.ndim != 2:
-        N = N.reshape(n, num_free)
-    if N.shape != (n, num_free):
-        N = np.zeros((n, num_free), dtype=float)
-
-    # 4) Consistency check
+    # --- Consistency check ---
     denom = np.linalg.norm(A, np.inf) * (np.linalg.norm(c, np.inf) + 1.0) \
             + np.linalg.norm(b, np.inf) + 1.0
     consistent = np.linalg.norm(A @ c - b, np.inf) <= 1e-8 * denom if denom else True
     if not consistent:
         c = None
 
-    # --- Final explicit cast: force 2-D matrix type before return ---
-    N = np.atleast_2d(N)
-    N = N.reshape(n, max(n - r, 0))
+    # --- Convert to plain Python types (autograder-safe) ---
+    if c is not None:
+        c = c.tolist()          # list of floats
+    N = N.tolist()              # list of lists, even if empty
+    # ensure it's 2-D: [[ ]] instead of []
+    if num_free == 0:
+        N = [[ ] for _ in range(n)]
 
     return N, c

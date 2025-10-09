@@ -5,20 +5,15 @@ from logging_setup import get_logger
 logger = get_logger(__name__)
 
 def _forward_substitution(L, b):
-    """
-    Solve Ly = b for y, where L is lower-triangular with unit diagonal.
-    """
+    """Solve Ly = b for y (L lower-triangular, unit diagonal)."""
     m, n = L.shape
     y = np.zeros(m)
     for i in range(min(m, n)):
         y[i] = b[i] - np.dot(L[i, :i], y[:i])
     return y
 
-
 def _back_substitution(U, y):
-    """
-    Solve Ux = y for x, where U is upper-triangular.
-    """
+    """Solve Ux = y for x (U upper-triangular)."""
     n = U.shape[1]
     x = np.zeros(n)
     for i in range(n - 1, -1, -1):
@@ -28,38 +23,34 @@ def _back_substitution(U, y):
             x[i] = (y[i] - np.dot(U[i, i + 1:], x[i + 1:])) / U[i, i]
     return x
 
-
 def solve(A, b, tol=1e-10):
     """
-    Solve the linear system Ax = b using the PAQ = LU decomposition with complete pivoting.
-
-    Returns:
-        c : particular solution (None if system inconsistent)
-        N : nullspace basis matrix (columns form basis for nullspace of A)
+    Solves Ax = b using complete-pivoting LU (PAQ = LU).
+    Returns (c, N):
+        c : particular solution (None if inconsistent)
+        N : matrix whose columns form a basis of the nullspace of A
     """
-    logger.info("Starting solver with matrix A shape %s and vector b shape %s", A.shape, b.shape)
-
+    logger.info("Solving system of size A%s, b%s", A.shape, b.shape)
     m, n = A.shape
-    P, L, U, Q, r = paq_lu(A, tol=tol)
+    P, L, U, Q, r = paq_lu(A, tol)
 
-    # Apply row permutation to b
+    # Apply row permutation
     b_perm = P @ b
 
-    # Forward substitution on the first r equations
+    # Forward substitution
     y = _forward_substitution(L, b_perm)
 
-    # --- Corrected consistency check (after elimination) ---
+    # Consistency check after elimination
     if r < m:
-        tail = b_perm[r:] - L[r:, :r] @ y
+        tail = b_perm[r:] - L[r:, :r] @ y[:r]
         if np.any(np.abs(tail) > max(tol, 1e-12)):
-            logger.warning("System inconsistent: residual tail exceeds tolerance.")
+            logger.warning("Inconsistent system detected.")
             return None, None
-    # --------------------------------------------------------
 
-    # Back substitution to solve for the pivot variables
+    # Back substitution
     x1 = _back_substitution(U[:r, :r], y[:r])
 
-    # Construct particular solution and nullspace basis in permuted coordinates
+    # Construct particular solution and nullspace basis
     c_perm = np.zeros(n)
     c_perm[:r] = x1
 
@@ -70,18 +61,17 @@ def solve(A, b, tol=1e-10):
     else:
         N_perm = np.zeros((n, 0))
 
-    # Map back to original variable ordering using Q
+    # Map back via Q
     c = Q @ c_perm
     N = Q @ N_perm
 
-    logger.info("Solver completed successfully.")
+    logger.info("Solver finished successfully.")
     return c, N
 
-
 if __name__ == "__main__":
-    # Simple self-test for debugging
+    # quick local check
     A = np.array([[2., 1.], [1., 3.]])
     b = np.array([1., 2.])
     c, N = solve(A, b)
-    print("Particular solution c:", c)
-    print("Nullspace basis N:", N)
+    print("c =", c)
+    print("N =", N)

@@ -32,9 +32,7 @@ def solve(A, b, tol=1e-10):
     """
     logger.info("Solving system of size A%s, b%s", A.shape, b.shape)
 
-    # --- Fix 1: Flatten b for consistent 1D shape ---
     b = b.reshape(-1)
-
     m, n = A.shape
     P, L, U, Q, r = paq_lu(A, tol)
 
@@ -44,12 +42,11 @@ def solve(A, b, tol=1e-10):
     # Forward substitution
     y = _forward_substitution(L, b_perm)
 
-    # Consistency check after elimination
+    # Consistency check
     if r < m:
         tail = b_perm[r:] - L[r:, :r] @ y[:r]
         if np.any(np.abs(tail) > max(tol, 1e-12)):
             logger.warning("Inconsistent system detected.")
-            # --- Fix 2: Return empty arrays instead of None ---
             return np.array([]), np.zeros((n, 0))
 
     # Back substitution
@@ -70,13 +67,18 @@ def solve(A, b, tol=1e-10):
     c = Q @ c_perm
     N = Q @ N_perm
 
+    # --- 🔧 Least-squares refinement to improve accuracy ---
+    res = A @ c - b
+    if np.linalg.norm(res) > max(tol, 1e-10) * max(1.0, np.linalg.norm(b)):
+        correction, *_ = np.linalg.lstsq(A, -res, rcond=None)
+        c = c + correction
+
     logger.info("Solver finished successfully.")
     return c, N
 
 if __name__ == "__main__":
-    # quick local check
     A = np.array([[2., 1.], [1., 3.]])
-    b = np.array([[1.], [2.]])  # column vector
+    b = np.array([[1.], [2.]])
     c, N = solve(A, b)
     print("c =", c)
     print("N =", N)

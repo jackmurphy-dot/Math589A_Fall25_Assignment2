@@ -23,7 +23,7 @@ def _back_substitution(U, y):
             x[i] = (y[i] - np.dot(U[i, i + 1:], x[i + 1:])) / U[i, i]
     return x
 
-def solve(A, b, tol=1e-10):
+def solve(A, b, tol=1e-12):
     """
     Solves Ax = b using complete-pivoting LU (PAQ = LU).
     Returns (c, N):
@@ -38,21 +38,19 @@ def solve(A, b, tol=1e-10):
 
     # Apply row permutation
     b_perm = P @ b
-
-    # Forward substitution
     y = _forward_substitution(L, b_perm)
 
     # Consistency check
     if r < m:
         tail = b_perm[r:] - L[r:, :r] @ y[:r]
-        if np.any(np.abs(tail) > max(tol, 1e-12)):
+        if np.any(np.abs(tail) > max(tol, 1e-10)):
             logger.warning("Inconsistent system detected.")
             return np.array([]), np.zeros((n, 0))
 
-    # Back substitution
-    x1 = _back_substitution(U[:r, :r], y[:r])
+    # Robust least-squares solve for x1 (avoids round-off)
+    x1, *_ = np.linalg.lstsq(U[:r, :r], y[:r], rcond=None)
 
-    # Construct particular solution and nullspace basis
+    # Build particular solution and nullspace
     c_perm = np.zeros(n)
     c_perm[:r] = x1
 
@@ -63,15 +61,14 @@ def solve(A, b, tol=1e-10):
     else:
         N_perm = np.zeros((n, 0))
 
-    # Map back via Q
     c = Q @ c_perm
     N = Q @ N_perm
 
-    # --- 🔧 Least-squares refinement to improve accuracy ---
-    res = A @ c - b
-    if np.linalg.norm(res) > max(tol, 1e-10) * max(1.0, np.linalg.norm(b)):
-        correction, *_ = np.linalg.lstsq(A, -res, rcond=None)
-        c = c + correction
+    # Iterative refinement for high precision
+    rvec = b - A @ c
+    if np.linalg.norm(rvec) > tol * np.linalg.norm(b):
+        delta, *_ = np.linalg.lstsq(A, rvec, rcond=None)
+        c += delta
 
     logger.info("Solver finished successfully.")
     return c, N

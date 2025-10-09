@@ -35,18 +35,13 @@ def _build_nullspace(U: np.ndarray, r: int, n: int, tol: float) -> np.ndarray:
         z_null = np.zeros(n)
         z_null[r + i] = 1.0 
         
-        # THE FIX IS HERE: The right-hand-side for the back-substitution
-        # must be correctly indexed from the U matrix.
-        rhs = -U[:r, r + i]
-        
-        z_basic = np.zeros(r)
+        # We need to solve U_basic * z_basic = -U_free * e_i
+        # where e_i is the i-th free variable basis vector.
         for k in range(r - 1, -1, -1):
-            # The sum only includes the basic variables we are solving for
-            s = np.dot(U[k, k + 1:r], z_basic[k + 1:r])
+            # THE FIX: The sum must be over ALL columns to the right of the pivot,
+            # which includes other basic variables and the free variables.
+            s = np.dot(U[k, k+1:], z_null[k+1:])
             
-            # We add the contribution from the free variables separately
-            s += np.dot(U[k, r:], z_null[r:])
-
             pivot = U[k, k]
             if abs(pivot) < tol:
                  raise np.linalg.LinAlgError("Singular matrix in nullspace calculation.")
@@ -81,9 +76,9 @@ def solve(A: np.ndarray, b: np.ndarray, tol: float = 1e-12) -> Tuple[Optional[np
         z = _backward_substitution(U, y, tol)
         c_list.append(z)
 
-    c_permuted = np.hstack(c_list).reshape(-1,1) if c_list else np.zeros((n, 0))
-
-    c = Q @ c_permuted
+    z_solution = np.hstack(c_list).reshape(-1,1) if c_list else np.zeros((n, 0))
+    c = Q @ z_solution
+    
     if b.ndim == 1:
         c = c.flatten()
 

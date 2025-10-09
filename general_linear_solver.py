@@ -27,10 +27,14 @@ def solve(A, b, tol=1e-10):
     """
     Solves Ax = b using complete-pivoting LU (PAQ = LU).
     Returns (c, N):
-        c : particular solution (None if inconsistent)
+        c : particular solution (empty array if inconsistent)
         N : matrix whose columns form a basis of the nullspace of A
     """
     logger.info("Solving system of size A%s, b%s", A.shape, b.shape)
+
+    # --- Fix 1: Flatten b for consistent 1D shape ---
+    b = b.reshape(-1)
+
     m, n = A.shape
     P, L, U, Q, r = paq_lu(A, tol)
 
@@ -45,7 +49,8 @@ def solve(A, b, tol=1e-10):
         tail = b_perm[r:] - L[r:, :r] @ y[:r]
         if np.any(np.abs(tail) > max(tol, 1e-12)):
             logger.warning("Inconsistent system detected.")
-            return None, None
+            # --- Fix 2: Return empty arrays instead of None ---
+            return np.array([]), np.zeros((n, 0))
 
     # Back substitution
     x1 = _back_substitution(U[:r, :r], y[:r])
@@ -71,7 +76,7 @@ def solve(A, b, tol=1e-10):
 if __name__ == "__main__":
     # quick local check
     A = np.array([[2., 1.], [1., 3.]])
-    b = np.array([1., 2.])
+    b = np.array([[1.], [2.]])  # column vector
     c, N = solve(A, b)
     print("c =", c)
     print("N =", N)

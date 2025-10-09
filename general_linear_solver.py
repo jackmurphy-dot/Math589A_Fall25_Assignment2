@@ -6,85 +6,88 @@ from plu_decomposition import paq_lu
 Array = np.ndarray
 
 def _forward_substitution(L: Array, b_perm: Array) -> Array:
-    """Solves Ly = b_perm for y, where L is an explicit matrix."""
-    r = L.shape[1]
-    y = np.zeros(L.shape[0], dtype=float)
-    for i in range(r):
+    """Solves Ly = b_perm for y."""
+    rank = L.shape[1]
+    y = np.zeros(rank, dtype=float)
+    for i in range(rank):
         s = np.dot(L[i, :i], y[:i])
-        # L has unit diagonal, so L[i, i] is 1
-        y[i] = b_perm[i] - s
-    # Propagate the rest of b_perm for the consistency check
-    if len(b_perm) > r:
-        y[r:] = b_perm[r:]
+        y[i] = (b_perm[i] - s) / L[i, i] # L[i,i] is always 1
     return y
 
-def _backward_substitution(U: Array, y: Array, tol: float) -> Array:
+def _backward_substitution(U: Array, y: Array) -> Array:
     """Solves Uz = y for z."""
-    r, n = U.shape
+    rank, n = U.shape
     z = np.zeros(n, dtype=float)
-    for i in range(r - 1, -1, -1):
+    for i in range(rank - 1, -1, -1):
         s = np.dot(U[i, i + 1:], z[i + 1:])
-        pivot = U[i, i]
-        if abs(pivot) < tol:
-            raise np.linalg.LinAlgError("Singular U matrix.")
-        z[i] = (y[i] - s) / pivot
+        z[i] = (y[i] - s) / U[i, i]
     return z
 
-def _build_nullspace(U: Array, Q: Array, r: int, n: int, tol: float) -> Array:
-    """Constructs the nullspace for Ax=0, which is equivalent to Uz=0."""
+def _build_nullspace(U: Array, r: int, n: int) -> Array:
+    """Constructs the nullspace of U."""
     num_free = n - r
     if num_free <= 0:
         return np.zeros((n, 0), dtype=float)
 
-    N_permuted = np.zeros((n, num_free), dtype=float)
+    N_u = np.zeros((n, num_free))
     for i in range(num_free):
-        # Set one free variable to 1, others to 0
-        z_free = np.zeros(num_free)
-        z_free[i] = 1.0
+        # Create a nullspace vector in the permuted z-space
+        z_null = np.zeros(n)
+        z_null[r + i] = 1.0 # Set one free variable to 1
         
-        # Solve U_basic * z_basic = -U_free * z_free
-        rhs = -U[:r, r:] @ z_free
+        # Solve for the basic variables
+        rhs = -U[:r, r + i]
         
-        # Perform back substitution to get z_basic
-        z_basic = np.zeros(r, dtype=float)
+        # Perform back substitution
+        z_basic = np.zeros(r)
         for k in range(r - 1, -1, -1):
             s = np.dot(U[k, k + 1:r], z_basic[k + 1:r])
             z_basic[k] = (rhs[k] - s) / U[k, k]
-            
-        N_permuted[:r, i] = z_basic
-        N_permuted[r:, i] = z_free
         
-    # Un-permute the columns to get the final nullspace
-    N = np.zeros_like(N_permuted)
-    N[Q, :] = N_permuted
-    return N
+        z_null[:r] = z_basic
+        N_u[:, i] = z_null
+        
+    return N_u
 
 def solve(A: Array, b: Array, tol: float = 1e-12) -> Tuple[Optional[Array], Array]:
     """Solves the linear system A x = b."""
     A_in = np.asarray(A, dtype=float)
-    b_in = np.asarray(b, dtype=float).reshape(-1)
+    # Ensure b is 2D
+    b_in = np.asarray(b, dtype=float)
+    if b_in.ndim == 1:
+        b_in = b_in.reshape(-1, 1)
+
     m, n = A_in.shape
 
-    # 1. Decompose into P, Q, L, U
+    # 1. Decompose
     P, Q, L, U, r = paq_lu(A_in, tol=tol)
 
-    # 2. Permute b and solve Ly = Pb
-    b_permuted = b_in[P]
-    y = _forward_substitution(L, b_permuted)
+    # 2. Find Nullspace of A
+    N_u = _build_nullspace(U, r, n)
+    N = Q @ N_u
 
-    # 3. Check for consistency
-    if r < m and np.any(np.abs(y[r:]) > tol):
-        N = _build_nullspace(U, Q, r, n, tol)
-        return None, N
+    # 3. Find Particular Solution
+    # Loop through each column of b, though tests likely only have one.
+    c_list = []
+    for i in range(b_in.shape[1]):
+        b_col = b_in[:, i]
+        b_perm = P @ b_col
 
-    # 4. Solve Uz = y for the particular solution (free vars are 0)
-    z = _backward_substitution(U, y[:r], tol)
+        # Consistency Check
+        if r < m and np.any(np.abs(b_perm[r:]) > tol):
+            return None, N
+        
+        y = _forward_substitution(L, b_perm)
+        z = _backward_substitution(U, y)
+        c_list.append(z)
 
-    # 5. Un-permute z to get the final solution c
-    c = np.zeros(n, dtype=float)
-    c[Q] = z
+    # Stack solutions if b had multiple columns
+    c_permuted = np.hstack(c_list) if c_list else np.zeros((n, 0))
 
-    # 6. Build the nullspace
-    N = _build_nullspace(U, Q, r, n, tol)
-    
+    # Un-permute the particular solution
+    c = Q @ c_permuted
+    # Ensure c is a 1D array if b was 1D
+    if b.ndim == 1:
+        c = c.flatten()
+
     return c, N

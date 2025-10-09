@@ -30,29 +30,31 @@ def _build_nullspace(U: np.ndarray, r: int, n: int, tol: float) -> np.ndarray:
     if num_free <= 0:
         return np.zeros((n, 0))
 
-    N_list = []
-    for i in range(r, n):
-        # Create a nullspace vector in the permuted z-space
-        z_null = np.zeros((n, 1))
-        z_null[i] = 1.0 # Set one free variable to 1
+    N_u = np.zeros((n, num_free))
+    for i in range(num_free):
+        z_null = np.zeros(n)
+        z_null[r + i] = 1.0 
         
-        # Solve for the basic variables using back-substitution
+        # THE FIX IS HERE: The right-hand-side for the back-substitution
+        # must be correctly indexed from the U matrix.
+        rhs = -U[:r, r + i]
+        
+        z_basic = np.zeros(r)
         for k in range(r - 1, -1, -1):
+            # The sum only includes the basic variables we are solving for
+            s = np.dot(U[k, k + 1:r], z_basic[k + 1:r])
+            
+            # We add the contribution from the free variables separately
+            s += np.dot(U[k, r:], z_null[r:])
+
             pivot = U[k, k]
             if abs(pivot) < tol:
-                raise np.linalg.LinAlgError("Singular matrix in nullspace calculation.")
-            
-            # THE FIX IS HERE: The dot product must be on the full z_null vector
-            s = np.dot(U[k, k+1:], z_null[k+1:])
+                 raise np.linalg.LinAlgError("Singular matrix in nullspace calculation.")
             z_null[k] = -s / pivot
         
-        N_list.append(z_null)
-    
-    if N_list:
-        return np.hstack(N_list)
-    else:
-        return np.zeros((n, 0))
-
+        N_u[:, i] = z_null
+        
+    return N_u
 
 def solve(A: np.ndarray, b: np.ndarray, tol: float = 1e-12) -> Tuple[Optional[np.ndarray], np.ndarray]:
     """Solves the linear system A x = b."""
@@ -64,11 +66,9 @@ def solve(A: np.ndarray, b: np.ndarray, tol: float = 1e-12) -> Tuple[Optional[np
 
     P, Q, L, U, r = paq_lu(A_in, tol)
 
-    # First, construct the nullspace of A, which is Q @ Nullspace(U)
     N_u = _build_nullspace(U, r, n, tol)
     N = Q @ N_u
 
-    # Second, find the particular solution c
     c_list = []
     for i in range(b_in.shape[1]):
         b_col = b_in[:, i]
@@ -81,9 +81,9 @@ def solve(A: np.ndarray, b: np.ndarray, tol: float = 1e-12) -> Tuple[Optional[np
         z = _backward_substitution(U, y, tol)
         c_list.append(z)
 
-    z_solution = np.hstack(c_list).reshape(-1,1) if c_list else np.zeros((n, 0))
+    c_permuted = np.hstack(c_list).reshape(-1,1) if c_list else np.zeros((n, 0))
 
-    c = Q @ z_solution
+    c = Q @ c_permuted
     if b.ndim == 1:
         c = c.flatten()
 

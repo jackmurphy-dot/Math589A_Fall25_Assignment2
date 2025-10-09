@@ -1,65 +1,50 @@
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple
 from logging_setup import logger
 
 Array = np.ndarray
 
-def paq_lu(A: Array, tol: float = 1e-12) -> Tuple[Array, np.ndarray, np.ndarray, int]:
+def paq_lu(A: Array, tol: float = 1e-12) -> Tuple[Array, Array, Array, Array, int]:
     """
-    Computes PAQ=LU decomposition using partial pivoting with column exchanges.
+    Computes PAQ=LU decomposition, returning separate L and U matrices.
     """
-    A = np.asarray(A, dtype=np.float64, copy=True)
-    m, n = A.shape
+    A_U = np.asarray(A, dtype=float, copy=True)
+    m, n = A_U.shape
+    
     P = np.arange(m)
     Q = np.arange(n)
+    L = np.zeros((m, min(m, n)), dtype=float)
     
-    k = 0
-    while k < min(m, n):
-        # 1. Partial Pivot Search in the current column k
-        max_val_in_col = 0.0
-        pivot_row_idx = k
-        for i in range(k, m):
-            current_val = np.abs(A[P[i], Q[k]])
-            if current_val > max_val_in_col:
-                max_val_in_col = current_val
-                pivot_row_idx = i
-
-        # 2. If pivot is too small, find a new column to swap in
-        if max_val_in_col < tol:
-            found_better_col = False
-            for j_search in range(k + 1, n):
-                # Find the best pivot in this new candidate column
-                max_val_in_new_col = 0.0
-                pivot_row_in_new_col = k
-                for i in range(k, m):
-                    val = np.abs(A[P[i], Q[j_search]])
-                    if val > max_val_in_new_col:
-                        max_val_in_new_col = val
-                        pivot_row_in_new_col = i
-                
-                # If this column has a usable pivot, swap it and stop searching
-                if max_val_in_new_col >= tol:
-                    Q[[k, j_search]] = Q[[j_search, k]]
-                    pivot_row_idx = pivot_row_in_new_col
-                    found_better_col = True
-                    break
-            
-            if not found_better_col:
-                break # No more pivots found, rank is k.
-
-        # 3. Perform virtual row swap
-        P[[k, pivot_row_idx]] = P[[pivot_row_idx, k]]
+    r = 0
+    for k in range(min(m, n)):
+        # 1. Find the pivot (largest element) in the remaining submatrix of U
+        sub_matrix = A_U[k:, k:]
+        i_rel, j_rel = np.unravel_index(np.argmax(np.abs(sub_matrix)), sub_matrix.shape)
+        pivot_row = k + i_rel
+        pivot_col = k + j_rel
         
-        # 4. Elimination
-        pivot_element = A[P[k], Q[k]]
-        for i in range(k + 1, m):
-            multiplier = A[P[i], Q[k]] / pivot_element
-            A[P[i], Q[k]] = multiplier
-            for j in range(k + 1, n):
-                A[P[i], Q[j]] -= multiplier * A[P[k], Q[j]]
-                
-        k += 1
+        if np.abs(A_U[pivot_row, pivot_col]) < tol:
+            break # No more pivots, rank is k.
+            
+        # 2. Perform swaps on matrices and permutation vectors
+        A_U[[k, pivot_row], :] = A_U[[pivot_row, k], :] # Swap rows in U
+        L[[k, pivot_row], :k] = L[[pivot_row, k], :k] # Swap corresponding rows in L
+        P[[k, pivot_row]] = P[[pivot_row, k]]         # Update row permutation vector
 
-    r = k
-    # THE FIX: Return r in the 4th position as expected by the solver.
-    return A, P, Q, r
+        A_U[:, [k, pivot_col]] = A_U[:, [pivot_col, k]] # Swap columns in U
+        Q[[k, pivot_col]] = Q[[pivot_col, k]]         # Update column permutation vector
+        
+        # 3. Set diagonal of L and compute multipliers
+        L[k, k] = 1.0
+        for i in range(k + 1, m):
+            L[i, k] = A_U[i, k] / A_U[k, k]
+            # Elimination step on U
+            A_U[i, k:] -= L[i, k] * A_U[k, k:]
+        
+        r += 1
+        
+    # Trim matrices to final rank
+    L = L[:, :r]
+    U = A_U[:r, :]
+    
+    return P, Q, L, U, r

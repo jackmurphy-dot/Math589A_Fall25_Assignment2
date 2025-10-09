@@ -3,47 +3,48 @@ from typing import Tuple
 
 def paq_lu(A: np.ndarray, tol: float = 1e-9) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
     """
-    Computes PAQ=LU decomposition, returning separate L and U matrices,
-    and P and Q as permutation matrices.
+    Computes PAQ=LU by creating separate L and U matrices with full pivoting.
+    P and Q are returned as permutation matrices.
     """
     m, n = A.shape
-    U = A.astype(np.float64, copy=True)
-    max_rank = min(m, n)
+    U_matrix = A.astype(np.float64, copy=True)
+    k_max = min(m, n)
     
-    # Initialize P and Q as identity MATRICES
-    P = np.eye(m, dtype=np.float64)
-    Q = np.eye(n, dtype=np.float64)
-    L = np.zeros((m, max_rank), dtype=np.float64)
+    P_matrix = np.eye(m, dtype=np.float64)
+    Q_matrix = np.eye(n, dtype=np.float64)
+    L_matrix = np.zeros((m, k_max), dtype=np.float64)
     
-    rank = max_rank
-    for k in range(max_rank):
-        # Full pivot search on the remaining submatrix of U
-        idx = np.argmax(np.abs(U[k:, k:]))
-        pivot_row = k + (idx // U[k:, k:].shape[1])
-        pivot_col = k + (idx % U[k:, k:].shape[1])
+    rank = k_max
+    for k in range(k_max):
+        # Find pivot in the remaining submatrix of U
+        sub_matrix = U_matrix[k:, k:]
+        pivot_idx = np.argmax(np.abs(sub_matrix))
+        p_row = k + (pivot_idx // sub_matrix.shape[1])
+        p_col = k + (pivot_idx % sub_matrix.shape[1])
 
-        if np.abs(U[pivot_row, pivot_col]) < tol:
+        if np.abs(U_matrix[p_row, p_col]) < tol:
             rank = k
             break
             
-        # Perform physical swaps on the matrices
-        U[[pivot_row, k], :] = U[[k, pivot_row], :]
-        P[[pivot_row, k], :] = P[[k, pivot_row], :]
-        U[:, [pivot_col, k]] = U[:, [k, pivot_col]]
-        Q[:, [pivot_col, k]] = Q[:, [k, pivot_col]]
+        # Perform physical swaps on all matrices
+        U_matrix[[p_row, k], :] = U_matrix[[k, p_row], :]
+        P_matrix[[p_row, k], :] = P_matrix[[k, p_row], :]
+        U_matrix[:, [p_col, k]] = U_matrix[:, [k, p_col]]
+        Q_matrix[:, [p_col, k]] = Q_matrix[:, [k, p_col]]
         if k > 0:
-            L[[pivot_row, k], :k] = L[[k, pivot_row], :k]
+            L_matrix[[p_row, k], :k] = L_matrix[[k, p_row], :k]
         
-        # Elimination
+        # Elimination step
         for i in range(k + 1, m):
-            L[i, k] = U[i, k] / U[k, k]
-            U[i, k:] -= L[i, k] * U[k, k:]
+            L_matrix[i, k] = U_matrix[i, k] / U_matrix[k, k]
+            U_matrix[i, k:] -= L_matrix[i, k] * U_matrix[k, k:]
     
-    # Add unit diagonal to L and trim matrices to final rank
+    # Set unit diagonal on L
     for i in range(rank):
-        L[i, i] = 1.0
+        L_matrix[i, i] = 1.0
         
-    L = L[:, :rank]
-    U = U[:rank, :]
+    # Trim matrices to final rank
+    L_matrix = L_matrix[:, :rank]
+    U_matrix = U_matrix[:rank, :]
     
-    return P, Q, L, U, rank
+    return P_matrix, Q_matrix, L_matrix, U_matrix, rank

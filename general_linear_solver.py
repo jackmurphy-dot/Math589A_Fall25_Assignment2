@@ -30,26 +30,31 @@ def _build_nullspace(U: np.ndarray, r: int, n: int, tol: float) -> np.ndarray:
     if num_free <= 0:
         return np.zeros((n, 0))
 
-    N_u = np.zeros((n, num_free))
-    for i in range(num_free):
-        z_null = np.zeros(n)
-        z_null[r + i] = 1.0 
+    N_list = []
+    for i in range(r, n):
+        # Create a nullspace vector in the permuted z-space
+        z_null = np.zeros((n, 1))
+        z_null[i] = 1.0 # Set one free variable to 1
         
-        # We need to solve U_basic * z_basic = -U_free * e_i
-        # where e_i is the i-th free variable basis vector.
+        # THE FIX: This is the correct back-substitution loop for the nullspace.
+        # It solves for the basic variables (k < r) in terms of the free ones (j >= r).
         for k in range(r - 1, -1, -1):
-            # THE FIX: The sum must be over ALL columns to the right of the pivot,
-            # which includes other basic variables and the free variables.
-            s = np.dot(U[k, k+1:], z_null[k+1:])
-            
             pivot = U[k, k]
             if abs(pivot) < tol:
-                 raise np.linalg.LinAlgError("Singular matrix in nullspace calculation.")
+                raise np.linalg.LinAlgError("Singular matrix in nullspace calculation.")
+            
+            # The sum includes contributions from ALL columns to the right of the pivot
+            s = np.dot(U[k, k+1:], z_null[k+1:])
             z_null[k] = -s / pivot
         
-        N_u[:, i] = z_null
-        
-    return N_u
+        N_list.append(z_null)
+    
+    # Check if the list is empty before stacking
+    if N_list:
+        return np.hstack(N_list)
+    else:
+        return np.zeros((n, 0))
+
 
 def solve(A: np.ndarray, b: np.ndarray, tol: float = 1e-12) -> Tuple[Optional[np.ndarray], np.ndarray]:
     """Solves the linear system A x = b."""

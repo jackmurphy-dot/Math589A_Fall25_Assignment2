@@ -5,81 +5,86 @@ from plu_decomposition import paq_lu
 
 Array = np.ndarray
 
-def forward_substitution(A, P, Q, b, r):
-    """Solves L y = P b, where L has an implicit unit diagonal."""
-    m = len(P)
-    y = np.zeros(m, dtype=np.float64)
-    b_permuted = b[P]
-    for i in range(m):
-        sum_val = 0.0
-        for j in range(min(i, r)):
-            sum_val += A[P[i], Q[j]] * y[j]
-        y[i] = b_permuted[i] - sum_val
+def _forward_substitution(L: Array, b_perm: Array) -> Array:
+    """Solves Ly = b_perm for y, where L is an explicit matrix."""
+    r = L.shape[1]
+    y = np.zeros(L.shape[0], dtype=float)
+    for i in range(r):
+        s = np.dot(L[i, :i], y[:i])
+        # L has unit diagonal, so L[i, i] is 1
+        y[i] = b_perm[i] - s
+    # Propagate the rest of b_perm for the consistency check
+    if len(b_perm) > r:
+        y[r:] = b_perm[r:]
     return y
 
-def backward_substitution(A, P, Q, y_slice, r, tol):
-    """Solves U_basic z_basic = y_basic for the basic variables."""
-    z_basic = np.zeros(r, dtype=np.float64)
+def _backward_substitution(U: Array, y: Array, tol: float) -> Array:
+    """Solves Uz = y for z."""
+    r, n = U.shape
+    z = np.zeros(n, dtype=float)
     for i in range(r - 1, -1, -1):
-        sum_val = 0.0
-        for j in range(i + 1, r):
-            sum_val += A[P[i], Q[j]] * z_basic[j]
-        
-        pivot = A[P[i], Q[i]]
+        s = np.dot(U[i, i + 1:], z[i + 1:])
+        pivot = U[i, i]
         if abs(pivot) < tol:
-            raise np.linalg.LinAlgError("Matrix is singular or near-singular.")
-        z_basic[i] = (y_slice[i] - sum_val) / pivot
-    return z_basic
+            raise np.linalg.LinAlgError("Singular U matrix.")
+        z[i] = (y[i] - s) / pivot
+    return z
 
-def build_nullspace(A, P, Q, r, n, tol):
-    """Constructs a basis for the nullspace of A."""
-    num_free_vars = n - r
-    if num_free_vars <= 0:
-        return np.zeros((n, 0), dtype=np.float64)
+def _build_nullspace(U: Array, Q: Array, r: int, n: int, tol: float) -> Array:
+    """Constructs the nullspace for Ax=0, which is equivalent to Uz=0."""
+    num_free = n - r
+    if num_free <= 0:
+        return np.zeros((n, 0), dtype=float)
 
-    N = np.zeros((n, num_free_vars), dtype=np.float64)
-    for f in range(num_free_vars):
-        rhs = -A[P[:r], Q[r + f]]
+    N_permuted = np.zeros((n, num_free), dtype=float)
+    for i in range(num_free):
+        # Set one free variable to 1, others to 0
+        z_free = np.zeros(num_free)
+        z_free[i] = 1.0
         
-        z_basic = np.zeros(r, dtype=np.float64)
-        for i in range(r - 1, -1, -1):
-            sum_val = 0.0
-            for j in range(i + 1, r):
-                sum_val += A[P[i], Q[j]] * z_basic[j]
+        # Solve U_basic * z_basic = -U_free * z_free
+        rhs = -U[:r, r:] @ z_free
+        
+        # Perform back substitution to get z_basic
+        z_basic = np.zeros(r, dtype=float)
+        for k in range(r - 1, -1, -1):
+            s = np.dot(U[k, k + 1:r], z_basic[k + 1:r])
+            z_basic[k] = (rhs[k] - s) / U[k, k]
             
-            pivot = A[P[i], Q[i]]
-            if abs(pivot) < tol:
-                raise np.linalg.LinAlgError("Singular U block in nullspace calculation.")
-            z_basic[i] = (rhs[i] - sum_val) / pivot
-
-        x_null = np.zeros(n, dtype=np.float64)
-        x_null[Q[:r]] = z_basic
-        x_null[Q[r + f]] = 1.0
-        N[:, f] = x_null
+        N_permuted[:r, i] = z_basic
+        N_permuted[r:, i] = z_free
+        
+    # Un-permute the columns to get the final nullspace
+    N = np.zeros_like(N_permuted)
+    N[Q, :] = N_permuted
     return N
 
-def solve(A: Array, b: Array, tol: float = 1e-6) -> Tuple[Optional[Array], Array]:
+def solve(A: Array, b: Array, tol: float = 1e-12) -> Tuple[Optional[Array], Array]:
     """Solves the linear system A x = b."""
-    A_input = np.asarray(A, dtype=np.float64)
-    b_input = np.asarray(b, dtype=np.float64).reshape(-1)
-    m, n = A_input.shape
-    if b_input.shape[0] != m:
-        raise ValueError("Incompatible dimensions between A and b.")
+    A_in = np.asarray(A, dtype=float)
+    b_in = np.asarray(b, dtype=float).reshape(-1)
+    m, n = A_in.shape
 
-    # THE FIX: Unpack the 4 return values from paq_lu correctly.
-    A_fac, P, Q, r = paq_lu(A_input, tol=tol)
+    # 1. Decompose into P, Q, L, U
+    P, Q, L, U, r = paq_lu(A_in, tol=tol)
 
-    y = forward_substitution(A_fac, P, Q, b_input, r)
+    # 2. Permute b and solve Ly = Pb
+    b_permuted = b_in[P]
+    y = _forward_substitution(L, b_permuted)
 
-    if r < m and np.max(np.abs(y[r:])) > tol:
-        N = build_nullspace(A_fac, P, Q, r, n, tol)
+    # 3. Check for consistency
+    if r < m and np.any(np.abs(y[r:]) > tol):
+        N = _build_nullspace(U, Q, r, n, tol)
         return None, N
 
-    z_basic = backward_substitution(A_fac, P, Q, y[:r], r, tol)
+    # 4. Solve Uz = y for the particular solution (free vars are 0)
+    z = _backward_substitution(U, y[:r], tol)
 
-    c = np.zeros(n, dtype=np.float64)
-    c[Q[:r]] = z_basic
+    # 5. Un-permute z to get the final solution c
+    c = np.zeros(n, dtype=float)
+    c[Q] = z
 
-    N = build_nullspace(A_fac, P, Q, r, n, tol)
+    # 6. Build the nullspace
+    N = _build_nullspace(U, Q, r, n, tol)
     
     return c, N

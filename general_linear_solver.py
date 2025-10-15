@@ -1,4 +1,4 @@
-# Minor change for first commit test
+# Minor change for commit test
 
 import numpy as np
 from plu_decomposition import paq_lu
